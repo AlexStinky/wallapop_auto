@@ -1,0 +1,216 @@
+export interface WallapopSubcategory {
+  id: string;
+  name: string; // Spanish name as in Wallapop
+  nameUa: string;
+}
+
+export interface WallapopCategory {
+  id: string;
+  name: string; // Spanish name as in Wallapop
+  nameUa: string;
+  subcategories: WallapopSubcategory[];
+}
+
+export const WALLAPOP_CATEGORIES: WallapopCategory[] = [
+  {
+    id: 'telefonia',
+    name: 'Móviles y telefonía',
+    nameUa: 'Телефони та зв\'язок',
+    subcategories: [
+      { id: 'smartphones', name: 'Móviles y smartphones', nameUa: 'Смартфони та телефони' },
+      { id: 'smartwatches', name: 'Smartwatches y pulseras', nameUa: 'Смарт-годинники' },
+      { id: 'accesorios_movil', name: 'Accesorios y fundas', nameUa: 'Аксесуари та чохли' },
+      { id: 'vintage_movil', name: 'Teléfonos vintage', nameUa: 'Вінтажні телефони' },
+      { id: 'piezas_telefonia', name: 'Piezas y repuestos', nameUa: 'Запчастини' },
+    ],
+  },
+  {
+    id: 'informatica',
+    name: 'Informática y electrónica',
+    nameUa: 'Комп\'ютери та електроніка',
+    subcategories: [
+      { id: 'ordenadores', name: 'Ordenadores y portátiles', nameUa: 'Ноутбуки та ПК' },
+      { id: 'tablets', name: 'Tablets y e-readers', nameUa: 'Планшети' },
+      { id: 'componentes', name: 'Componentes de ordenador', nameUa: 'Комплектуючі' },
+      { id: 'monitores', name: 'Monitores', nameUa: 'Монітори' },
+      { id: 'perifericos', name: 'Teclados, ratones y periféricos', nameUa: 'Клавіатури та миші' },
+      { id: 'impresoras', name: 'Impresoras y escáneres', nameUa: 'Принтери' },
+      { id: 'cables_adaptadores', name: 'Cables y adaptadores', nameUa: 'Кабелі та адаптери' },
+    ],
+  },
+  {
+    id: 'tv_audio_foto',
+    name: 'TV, audio y foto',
+    nameUa: 'ТБ, аудіо та фото',
+    subcategories: [
+      { id: 'auriculares', name: 'Auriculares y cascos', nameUa: 'Навушники' },
+      { id: 'altavoces', name: 'Altavoces y barras de sonido', nameUa: 'Колонки та акустика' },
+      { id: 'televisores', name: 'Televisores', nameUa: 'Телевізори' },
+      { id: 'camaras', name: 'Fotografía y cámaras', nameUa: 'Фотоапарати та камери' },
+      { id: 'proyectores', name: 'Proyectores', nameUa: 'Проектори' },
+    ],
+  },
+  {
+    id: 'consolas_videojuegos',
+    name: 'Consolas y videojuegos',
+    nameUa: 'Консолі та відеоігри',
+    subcategories: [
+      { id: 'playstation', name: 'PlayStation', nameUa: 'PlayStation' },
+      { id: 'nintendo', name: 'Nintendo', nameUa: 'Nintendo' },
+      { id: 'xbox', name: 'Xbox', nameUa: 'Xbox' },
+      { id: 'juegos', name: 'Videojuegos', nameUa: 'Ігри' },
+      { id: 'accesorios_consolas', name: 'Accesorios y mandos', nameUa: 'Геймпади та аксесуари' },
+      { id: 'retro', name: 'Consolas retro', nameUa: 'Ретро консолі' },
+    ],
+  },
+  {
+    id: 'hogar_jardin',
+    name: 'Hogar y jardín',
+    nameUa: 'Дім та сад',
+    subcategories: [
+      { id: 'sofas', name: 'Sofas y divanes', nameUa: 'Дивани та крісла' },
+      { id: 'sofa_cama', name: 'Sofa cama y futones', nameUa: 'Дивани-ліжка' },
+      { id: 'muebles', name: 'Muebles y estanterías', nameUa: 'Меблі та шафи' },
+      { id: 'mesas_sillas', name: 'Mesas y sillas', nameUa: 'Столи та стільці' },
+      { id: 'camas_colchones', name: 'Camas y colchones', nameUa: 'Ліжка та матраци' },
+      { id: 'decoracion', name: 'Decoración', nameUa: 'Декор' },
+      { id: 'iluminacion', name: 'Iluminación y lámparas', nameUa: 'Освітлення та лампи' },
+      { id: 'cocina_menaje', name: 'Menaje y cocina', nameUa: 'Посуд та кухня' },
+      { id: 'bano', name: 'Baño', nameUa: 'Ванна кімната' },
+      { id: 'jardin_terraza', name: 'Jardín y terraza', nameUa: 'Сад і тераса' },
+    ],
+  },
+  {
+    id: 'moda_accesorios',
+    name: 'Moda y accesorios',
+    nameUa: 'Одяг та аксесуари',
+    subcategories: [
+      { id: 'ropa_mujer', name: 'Ropa de mujer', nameUa: 'Жіночий одяг' },
+      { id: 'ropa_hombre', name: 'Ropa de hombre', nameUa: 'Чоловічий одяг' },
+      { id: 'calzado_mujer', name: 'Calzado de mujer', nameUa: 'Жіноче взуття' },
+      { id: 'calzado_hombre', name: 'Calzado de hombre', nameUa: 'Чоловіче взуття' },
+      { id: 'bolsos_mochilas', name: 'Bolsos y mochilas', nameUa: 'Сумки та рюкзаки' },
+      { id: 'relojes', name: 'Relojes', nameUa: 'Годинники' },
+      { id: 'joyeria', name: 'Joyería y bisutería', nameUa: 'Прикраси' },
+      { id: 'gafas_sol', name: 'Gafas de sol', nameUa: 'Сонцезахисні окуляри' },
+    ],
+  },
+  {
+    id: 'motor_accesorios',
+    name: 'Motor y accesorios',
+    nameUa: 'Авто / Мото запчастини та аксесуари',
+    subcategories: [
+      { id: 'recambios_coches', name: 'Recambios de coches', nameUa: 'Запчастини до авто' },
+      { id: 'accesorios_coche', name: 'Accesorios de coches', nameUa: 'Аксесуари для авто' },
+      { id: 'neumaticos_llantas', name: 'Neumáticos y llantas', nameUa: 'Шини та диски' },
+      { id: 'recambios_motos', name: 'Recambios de moto', nameUa: 'Запчастини для мото' },
+      { id: 'cascos_ropa_moto', name: 'Cascos y equipamiento', nameUa: 'Шоломи та екіпірування' },
+      { id: 'audio_coche', name: 'Car audio y electrónica', nameUa: 'Автомагнітоли' },
+    ],
+  },
+  {
+    id: 'motos',
+    name: 'Motos',
+    nameUa: 'Мотоцикли та скутери',
+    subcategories: [
+      { id: 'scooters', name: 'Scooters', nameUa: 'Скутери' },
+      { id: 'carretera', name: 'Motos de carretera', nameUa: 'Дорожні мотоцикли' },
+      { id: 'campo_cross', name: 'Motos de campo y cross', nameUa: 'Крос і ендуро' },
+      { id: 'ciclomotores', name: 'Ciclomotores', nameUa: 'Мопеди' },
+    ],
+  },
+  {
+    id: 'deporte_ocio',
+    name: 'Deporte y ocio',
+    nameUa: 'Спорт та відпочинок',
+    subcategories: [
+      { id: 'fitness_gimnasio', name: 'Fitness y gimnasio', nameUa: 'Фітнес і тренажери' },
+      { id: 'padel_tenis', name: 'Pádel y tenis', nameUa: 'Падел і теніс' },
+      { id: 'futbol', name: 'Fútbol', nameUa: 'Футбол' },
+      { id: 'camping_montana', name: 'Camping y montaña', nameUa: 'Кемпінг і туризм' },
+      { id: 'deportes_acuaticos', name: 'Deportes acuáticos', nameUa: 'Водний спорт' },
+      { id: 'patinetes_skate', name: 'Patinetes y monopatines', nameUa: 'Самокати та скейти' },
+    ],
+  },
+  {
+    id: 'bicicletas',
+    name: 'Bicicletas',
+    nameUa: 'Велосипеди',
+    subcategories: [
+      { id: 'bicis_montana', name: 'Bicicletas de montaña', nameUa: 'Гірські велосипеди' },
+      { id: 'bicis_carretera', name: 'Bicicletas de carretera', nameUa: 'Шосейні велосипеди' },
+      { id: 'bicis_electricas', name: 'Bicicletas eléctricas', nameUa: 'Електровелосипеди' },
+      { id: 'bicis_paseo_ciudad', name: 'Bicicletas de paseo', nameUa: 'Міські велосипеди' },
+      { id: 'bicis_ninos', name: 'Bicicletas infantiles', nameUa: 'Дитячі велосипеди' },
+      { id: 'componentes_bici', name: 'Componentes y recambios', nameUa: 'Запчастини' },
+      { id: 'accesorios_bici', name: 'Accesorios y cascos', nameUa: 'Аксесуари' },
+    ],
+  },
+  {
+    id: 'electrodomesticos',
+    name: 'Electrodomésticos',
+    nameUa: 'Побутова техніка',
+    subcategories: [
+      { id: 'frigorificos', name: 'Frigoríficos y neveras', nameUa: 'Холодильники' },
+      { id: 'lavadoras', name: 'Lavadoras y secadoras', nameUa: 'Пральні машини' },
+      { id: 'microondas', name: 'Microondas y hornos', nameUa: 'Мікрохвильовки' },
+      { id: 'cafeteras', name: 'Cafeteras', nameUa: 'Кавомашини' },
+      { id: 'aspiradoras', name: 'Aspiradoras', nameUa: 'Пилососи' },
+      { id: 'climatizacion', name: 'Climatización y aire', nameUa: 'Кондиціонери та обігрів' },
+      { id: 'pequeno_electro', name: 'Pequeño electrodoméstico', nameUa: 'Дрібна кухонна техніка' },
+    ],
+  },
+  {
+    id: 'cine_libros_musica',
+    name: 'Cine, libros y música',
+    nameUa: 'Книги, музика, фільми',
+    subcategories: [
+      { id: 'libros', name: 'Libros y cómics', nameUa: 'Книги та комікси' },
+      { id: 'instrumentos', name: 'Instrumentos musicales', nameUa: 'Музичні інструменти' },
+      { id: 'vinilos_cds', name: 'Vinilos y CDs', nameUa: 'Вініл та CD' },
+      { id: 'peliculas_dvd', name: 'Películas y series', nameUa: 'Фільми' },
+    ],
+  },
+  {
+    id: 'ninos_bebes',
+    name: 'Niños y bebés',
+    nameUa: 'Діти та малюки',
+    subcategories: [
+      { id: 'carritos_sillas', name: 'Carritos y sillas', nameUa: 'Коляски та автокрісла' },
+      { id: 'ropa_bebe', name: 'Ropa de bebé e infantil', nameUa: 'Дитячий одяг' },
+      { id: 'juguetes', name: 'Juguetes y juegos', nameUa: 'Іграшки' },
+      { id: 'cuna_mobiliario', name: 'Cunas y mobiliario', nameUa: 'Ліжечка та меблі' },
+    ],
+  },
+  {
+    id: 'coleccionismo',
+    name: 'Coleccionismo',
+    nameUa: 'Колекціонування',
+    subcategories: [
+      { id: 'monedas_billetes', name: 'Monedas y billetes', nameUa: 'Монети та банкноти' },
+      { id: 'figuras_antiguas', name: 'Figuras de acción', nameUa: 'Фігурки' },
+      { id: 'sellos', name: 'Sellos y filatelia', nameUa: 'Марки' },
+      { id: 'cartas_tcg', name: 'Cartas coleccionables', nameUa: 'Колекційні картки' },
+      { id: 'antiguedades', name: 'Antigüedades', nameUa: 'Антикваріат' },
+    ],
+  },
+  {
+    id: 'construccion_reformas',
+    name: 'Construcción y reformas',
+    nameUa: 'Будівництво та інструменти',
+    subcategories: [
+      { id: 'herramientas_manuales', name: 'Herramientas de mano', nameUa: 'Ручний інструмент' },
+      { id: 'herramientas_electricas', name: 'Herramientas eléctricas', nameUa: 'Електроінструмент' },
+      { id: 'materiales', name: 'Materiales y fontanería', nameUa: 'Матеріали' },
+      { id: 'electricidad', name: 'Electricidad', nameUa: 'Електрика' },
+    ],
+  },
+  {
+    id: 'otros',
+    name: 'Otros',
+    nameUa: 'Інше',
+    subcategories: [
+      { id: 'otros_varios', name: 'Otros artículos', nameUa: 'Різне' },
+    ],
+  },
+];
