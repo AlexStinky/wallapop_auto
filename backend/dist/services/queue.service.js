@@ -201,6 +201,7 @@ class QueueService {
         }).catch(() => null);
         this.broadcast();
         const settings = await prisma_1.default.settings.findFirst();
+        const headless = settings?.headless ?? true;
         const cookiesPath = path.join(process.cwd(), '.session-cookies.json');
         const hasCookies = fs.existsSync(cookiesPath);
         if (!hasCookies && (!settings || !settings.wallapopEmail || !settings.wallapopPassword)) {
@@ -213,8 +214,7 @@ class QueueService {
             return { success: false, error: err };
         }
         try {
-            // Always initialize visible browser during publication as requested
-            await browser_service_1.browserService.initialize(false);
+            await browser_service_1.browserService.initialize(headless);
             const alreadyIn = await browser_service_1.browserService.isLoggedIn();
             if (!alreadyIn) {
                 if (settings?.wallapopEmail && settings?.wallapopPassword) {
@@ -292,9 +292,10 @@ class QueueService {
                 console.error('[Queue] No credentials or cookies configured');
                 return;
             }
-            // Initialize browser visibly
+            // Initialize browser
             try {
-                await browser_service_1.browserService.initialize(false);
+                const headless = settings?.headless ?? true;
+                await browser_service_1.browserService.initialize(headless);
                 const alreadyIn = await browser_service_1.browserService.isLoggedIn();
                 if (!alreadyIn) {
                     if (settings?.wallapopEmail && settings?.wallapopPassword) {

@@ -12,7 +12,7 @@ class BrowserService {
   private browser: Browser | null = null;
   private context: BrowserContext | null = null;
   private page: Page | null = null;
-  private isHeadless = false;
+  private isHeadless = true;
 
   // ─── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -260,7 +260,7 @@ class BrowserService {
 
   private async ensurePage(): Promise<Page> {
     if (!this.browser || !this.context) {
-      await this.initialize(false);
+      await this.initialize(this.isHeadless);
     }
     if (!this.page || this.page.isClosed()) {
       this.page = await this.context!.newPage();

@@ -44,7 +44,7 @@ class BrowserService {
         this.browser = null;
         this.context = null;
         this.page = null;
-        this.isHeadless = false;
+        this.isHeadless = true;
     }
     // ─── Lifecycle ──────────────────────────────────────────────────────────────
     async initialize(headless) {
@@ -268,7 +268,7 @@ class BrowserService {
     // ─── Helpers ────────────────────────────────────────────────────────────────
     async ensurePage() {
         if (!this.browser || !this.context) {
-            await this.initialize(false);
+            await this.initialize(this.isHeadless);
         }
         if (!this.page || this.page.isClosed()) {
             this.page = await this.context.newPage();

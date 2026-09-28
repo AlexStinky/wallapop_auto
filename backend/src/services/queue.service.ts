@@ -190,6 +190,7 @@ class QueueService {
     this.broadcast();
 
     const settings = await prisma.settings.findFirst();
+    const headless = settings?.headless ?? true;
     const cookiesPath = path.join(process.cwd(), '.session-cookies.json');
     const hasCookies = fs.existsSync(cookiesPath);
 
@@ -204,8 +205,7 @@ class QueueService {
     }
 
     try {
-      // Always initialize visible browser during publication as requested
-      await browserService.initialize(false);
+      await browserService.initialize(headless);
       const alreadyIn = await browserService.isLoggedIn();
       if (!alreadyIn) {
         if (settings?.wallapopEmail && settings?.wallapopPassword) {
@@ -284,9 +284,10 @@ class QueueService {
         return;
       }
 
-      // Initialize browser visibly
+      // Initialize browser
       try {
-        await browserService.initialize(false);
+        const headless = settings?.headless ?? true;
+        await browserService.initialize(headless);
 
         const alreadyIn = await browserService.isLoggedIn();
         if (!alreadyIn) {

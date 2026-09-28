@@ -156,7 +156,7 @@ async function getOrCreateSettings() {
             wallapopEmail: '',
             wallapopPassword: '',
             publishDelay: 30,
-            headless: false,
+            headless: true,
         },
     });
 }

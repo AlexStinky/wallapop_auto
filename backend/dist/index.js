@@ -101,7 +101,7 @@ async function initDb() {
                     wallapopEmail: '',
                     wallapopPassword: '',
                     publishDelay: 30,
-                    headless: false,
+                    headless: true,
                 },
             });
             console.log('[Server] Default settings created');
