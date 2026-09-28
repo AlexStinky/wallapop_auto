@@ -15,7 +15,7 @@ for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":3000" ^| findstr "LISTENING
 
 echo.
 echo [2/6] Updating code from Git (git pull)...
-git checkout -- backend/dist backend/.chrome-profile backend/package-lock.json frontend/package-lock.json >nul 2>&1
+git checkout -- backend/dist backend/package-lock.json frontend/package-lock.json >nul 2>&1
 git pull
 if %errorlevel% neq 0 (
     echo - Conflict detected. Resetting tracked files and retrying pull...
@@ -54,7 +54,7 @@ echo - Starting Backend (port 3001)...
 start "Wallapop Backend" cmd /k "cd /d %~dp0backend && title Wallapop Backend && node dist/index.js"
 
 echo - Starting Frontend (port 3000)...
-start "Wallapop Frontend" cmd /k "cd /d %~dp0frontend && title Wallapop Frontend && npm run dev -- -H 0.0.0.0"
+start "Wallapop Frontend" cmd /k "cd /d %~dp0frontend && title Wallapop Frontend && npm start -- -H 0.0.0.0"
 
 echo.
 echo Waiting 5 seconds for services to initialize...

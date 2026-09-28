@@ -1,12 +1,20 @@
 # Executables & Binaries
 *.exe
-cloudflared.exe
 
 # Logs & scratch
 *.log
-tunnel.log
 backend/scratch-*.js
 
 # OS & Environment
 .DS_Store
 Thumbs.db
+
+# Sessions & Cookies
+*.session-cookies.json
+.session-cookies.json
+.chrome-profile/
+backend/.chrome-profile/
+backend/.session-cookies.json
+
+
+
