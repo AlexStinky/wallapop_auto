@@ -228,19 +228,6 @@ export default function NewProductPage() {
 
       {/* ── Main Content Container ────────────────────────────── */}
       <main className="mx-auto max-w-xl px-4 pt-3 pb-44">
-        {/* Banner: Revisa la información */}
-        <div className="flex items-start gap-3.5 rounded-2xl bg-[#EDF5F7] p-4 text-[#192A3E]">
-          <div className="mt-0.5 text-[#015354]">
-            <Sparkles size={22} className="fill-[#015354]/20 text-[#015354]" />
-          </div>
-          <div className="flex-1">
-            <h2 className="text-sm font-bold text-[#015354]">Revisa la información</h2>
-            <p className="mt-0.5 text-xs text-[#2A4345] leading-relaxed">
-              Hemos rellenado algunos detalles por ti. Completa los que faltan para terminar.
-            </p>
-          </div>
-        </div>
-
         {/* ── Form ─────────────────────────────────────────────── */}
         <form id="product-form" onSubmit={handleSubmit(onSubmit)} className="mt-5 space-y-3.5">
           <button id="product-form-hidden-submit" type="submit" className="hidden" />

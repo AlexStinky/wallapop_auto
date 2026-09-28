@@ -9,29 +9,40 @@ echo.
 
 cd /d %~dp0
 
-echo [1/5] Updating code from Git (git pull)...
+echo [1/6] Clearing ports 3000 and 3001...
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":3001" ^| findstr "LISTENING"') do taskkill /f /pid %%a >nul 2>&1
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":3000" ^| findstr "LISTENING"') do taskkill /f /pid %%a >nul 2>&1
+
+echo.
+echo [2/6] Updating code from Git (git pull)...
 git pull
 
 echo.
-echo [2/5] Updating Backend dependencies (npm install) and building...
+echo [3/6] Clearing cache (.next, dist)...
+if exist "%~dp0frontend\.next" (
+    echo - Removing frontend .next cache...
+    rd /s /q "%~dp0frontend\.next" >nul 2>&1
+)
+if exist "%~dp0backend\dist" (
+    echo - Removing backend dist cache...
+    rd /s /q "%~dp0backend\dist" >nul 2>&1
+)
+
+echo.
+echo [4/6] Updating Backend dependencies (npm install) and building...
 cd /d %~dp0backend
 call npm install
 call npm run build
 
 echo.
-echo [3/5] Updating Frontend dependencies (npm install)...
+echo [5/6] Updating Frontend dependencies (npm install)...
 cd /d %~dp0frontend
 call npm install
 
 cd /d %~dp0
 
 echo.
-echo [4/5] Clearing ports 3000 and 3001...
-for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":3001" ^| findstr "LISTENING"') do taskkill /f /pid %%a >nul 2>&1
-for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":3000" ^| findstr "LISTENING"') do taskkill /f /pid %%a >nul 2>&1
-
-echo.
-echo [5/5] Starting Services...
+echo [6/6] Starting Services...
 echo - Starting Backend (port 3001)...
 start "Wallapop Backend" cmd /k "cd /d %~dp0backend && title Wallapop Backend && node dist/index.js"
 
