@@ -10,10 +10,8 @@ import {
   ChevronDown,
   X,
   Image as ImageIcon,
-  Save,
-  Loader2,
 } from 'lucide-react';
-import { getProduct, updateProduct, uploadImages, getImageUrl, Product } from '@/lib/api';
+import { getProduct, updateProduct, uploadImages, getImageUrl } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import toast from 'react-hot-toast';
 
@@ -22,9 +20,9 @@ import toast from 'react-hot-toast';
 const schema = z.object({
   category: z.string().optional(),
   subcategory: z.string().optional(),
-  title: z.string().min(3, 'Mínimo 3 caracteres').max(50, 'Máximo 50 caracteres'),
-  description: z.string().min(10, 'Mínimo 10 caracteres').max(640, 'Máximo 640 caracteres'),
-  condition: z.string().min(1, 'Selecciona el estado'),
+  title: z.string().min(1, 'Вкажіть назву товару').max(60, 'Максимум 60 символів'),
+  description: z.string().min(1, 'Вкажіть опис товару').max(2000, 'Максимум 2000 символів'),
+  condition: z.string().min(1, 'Виберіть стан товару'),
   brand: z.string().optional(),
   model: z.string().optional(),
   year: z.string().optional(),
@@ -32,9 +30,9 @@ const schema = z.object({
   material: z.string().optional(),
   location: z.string().optional(),
   color: z.string().optional(),
-  price: z.coerce.number().positive('Indica un precio válido'),
-  quantity: z.coerce.number().int().positive('La cantidad debe ser mayor que 0'),
-  weight: z.string().min(1, 'Selecciona el peso'),
+  price: z.coerce.number().positive('Вкажіть коректну ціну'),
+  quantity: z.coerce.number().int().positive('Кількість повинна бути більше 0'),
+  weight: z.string().min(1, 'Виберіть вагу / розмір'),
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -95,6 +93,7 @@ interface ImageItem {
   type: 'existing' | 'new';
   url: string;
   file?: File;
+  originalPath?: string;
 }
 
 export default function EditProductPage() {
@@ -112,7 +111,6 @@ export default function EditProductPage() {
     register,
     control,
     handleSubmit,
-    setValue,
     reset,
     watch,
     formState: { errors },
@@ -136,9 +134,9 @@ export default function EditProductPage() {
       try {
         const prod = await getProduct(id);
         reset({
-          title: prod.title,
-          description: prod.description,
-          price: prod.price,
+          title: prod.title || '',
+          description: prod.description || '',
+          price: prod.price || 0,
           category: prod.category || '',
           subcategory: prod.subcategory || '',
           condition: prod.condition || 'used_like_new',
@@ -160,6 +158,7 @@ export default function EditProductPage() {
         const existingItems: ImageItem[] = (prod.images || []).map((path) => ({
           type: 'existing',
           url: getImageUrl(path),
+          originalPath: path,
         }));
         setImages(existingItems);
       } catch (err) {
@@ -204,23 +203,23 @@ export default function EditProductPage() {
     }
 
     setSubmitting(true);
+    const saveBtn = document.getElementById('btn-save-product') as HTMLButtonElement | null;
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Збереження...';
+    }
 
     try {
       // 1. Separate existing images and new files
-      const existingPaths: string[] = [];
-      const newFiles: File[] = [];
+      const existingPaths = images
+        .filter((it) => it.type === 'existing' && it.originalPath)
+        .map((it) => it.originalPath!);
 
-      for (const item of images) {
-        if (item.type === 'existing') {
-          // Clean leading slash if any
-          const clean = item.url.replace(/^\/+/, '');
-          existingPaths.push(clean);
-        } else if (item.file) {
-          newFiles.push(item.file);
-        }
-      }
+      const newFiles = images
+        .filter((it) => it.type === 'new' && it.file)
+        .map((it) => it.file!);
 
-      // 2. Upload new files
+      // 2. Upload newly added files
       let uploadedPaths: string[] = [];
       if (newFiles.length > 0) {
         uploadedPaths = await uploadImages(newFiles);
@@ -228,10 +227,10 @@ export default function EditProductPage() {
 
       const allImages = [...existingPaths, ...uploadedPaths];
 
-      // 3. Update product
+      // 3. Update product in DB
       await updateProduct(id, {
-        title: values.title,
-        description: values.description,
+        title: values.title.trim(),
+        description: values.description.trim(),
         price: values.price,
         category: values.category?.trim() || values.title.trim().slice(0, 50),
         subcategory: undefined,
@@ -248,12 +247,25 @@ export default function EditProductPage() {
         images: allImages,
       });
 
-      toast.success('Зміни збережено!');
+      toast.success('Зміни успішно збережено!');
       router.push(`/products/${id}`);
     } catch {
       toast.error('Помилка при збереженні змін');
+      if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Зберегти зміни';
+      }
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const onError = (formErrors: any) => {
+    const errorList = Object.values(formErrors) as any[];
+    if (errorList.length > 0 && errorList[0]?.message) {
+      toast.error(errorList[0].message);
+    } else {
+      toast.error('Будь ласка, заповніть обов\'язкові поля');
     }
   };
 
@@ -285,7 +297,19 @@ export default function EditProductPage() {
 
       {/* ── Main Content Container ────────────────────────────── */}
       <main className="mx-auto max-w-xl px-4 pt-3 pb-36">
-        <form id="product-form" onSubmit={handleSubmit(onSubmit)} className="mt-5 space-y-3.5">
+        <form
+          id="product-form"
+          onSubmit={handleSubmit(onSubmit, onError)}
+          className="mt-5 space-y-3.5"
+        >
+          {/* Hidden submit button triggered by BottomNav */}
+          <button
+            id="product-form-hidden-submit"
+            type="submit"
+            disabled={submitting}
+            className="hidden"
+          />
+
           {/* Photos Row */}
           <div>
             <div className="flex items-center gap-3 overflow-x-auto pb-2 pt-1 no-scrollbar">
@@ -364,7 +388,7 @@ export default function EditProductPage() {
             />
           </div>
 
-          {/* ── Card 2: Marca* ───────────────────────────────── */}
+          {/* ── Card 2: Marca ───────────────────────────────── */}
           <div className="rounded-2xl border border-gray-200 p-4 bg-white transition-all focus-within:border-[#00C9A7] focus-within:ring-2 focus-within:ring-[#00C9A7]/10">
             <label className="block text-xs font-normal text-gray-500">Marca</label>
             <input
@@ -375,7 +399,7 @@ export default function EditProductPage() {
             />
           </div>
 
-          {/* ── Card 3: Color* ───────────────────────────────── */}
+          {/* ── Card 3: Color ───────────────────────────────── */}
           <div className="relative rounded-2xl border border-gray-200 p-4 bg-white transition-all focus-within:border-[#00C9A7]">
             <label className="block text-xs font-normal text-gray-500">Color</label>
             <select
@@ -600,36 +624,6 @@ export default function EditProductPage() {
               </div>
             </div>
           )}
-
-          {/* ── Fixed Bottom Actions ───────────────────────────── */}
-          <div className="fixed bottom-0 left-0 right-0 z-20 bg-white/95 backdrop-blur-md border-t border-gray-100 p-4">
-            <div className="mx-auto max-w-xl flex gap-3">
-              <button
-                type="button"
-                onClick={() => router.back()}
-                className="flex-1 rounded-2xl border border-gray-200 bg-white py-3.5 text-base font-semibold text-gray-700 shadow-sm hover:bg-gray-50 active:scale-95 transition-all"
-              >
-                Скасувати
-              </button>
-              <button
-                type="submit"
-                disabled={submitting}
-                className="flex-[2] flex items-center justify-center gap-2 rounded-2xl bg-[#00C9A7] py-3.5 text-base font-bold text-white shadow-md shadow-[#00C9A7]/30 hover:bg-[#00B594] active:scale-95 transition-all disabled:opacity-50"
-              >
-                {submitting ? (
-                  <>
-                    <Loader2 size={18} className="animate-spin" />
-                    Збереження...
-                  </>
-                ) : (
-                  <>
-                    <Save size={18} />
-                    Зберегти зміни
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
         </form>
       </main>
     </div>

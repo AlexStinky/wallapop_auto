@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, Package, PlusCircle, Settings, Clock, Send } from 'lucide-react';
+import { Home, Package, PlusCircle, Settings, Clock, Send, Save } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const tabs = [
@@ -19,7 +19,7 @@ export function BottomNav() {
 
   return (
     <nav className="fixed bottom-0 left-1/2 z-50 w-full max-w-[480px] -translate-x-1/2 border-t border-gray-100 bg-white/95 backdrop-blur-md pb-safe shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
-      {(isNewProduct || isEditProduct) && (
+      {isNewProduct && (
         <div className="px-3 pt-2.5 pb-2 border-b border-gray-100 flex gap-2">
           <button
             id="btn-add-to-queue"
@@ -56,6 +56,35 @@ export function BottomNav() {
           >
             <Send size={15} className="flex-shrink-0" />
             Опублікувати зараз
+          </button>
+        </div>
+      )}
+
+      {isEditProduct && (
+        <div className="px-3 pt-2.5 pb-2 border-b border-gray-100 flex gap-2">
+          <button
+            type="button"
+            onClick={() => window.history.back()}
+            className="flex-1 rounded-full border border-gray-200 bg-white py-3 px-2 text-xs sm:text-sm font-semibold text-gray-700 shadow-sm transition-all hover:bg-gray-50 active:scale-[0.98] flex items-center justify-center gap-1.5 whitespace-nowrap"
+          >
+            Скасувати
+          </button>
+          <button
+            id="btn-save-product"
+            type="button"
+            onClick={() => {
+              const hiddenSubmit = document.getElementById('product-form-hidden-submit');
+              if (hiddenSubmit) {
+                hiddenSubmit.click();
+              } else {
+                const form = document.getElementById('product-form') as HTMLFormElement | null;
+                if (form) form.requestSubmit();
+              }
+            }}
+            className="flex-1 rounded-full bg-[#00C9A7] py-3 px-2 text-xs sm:text-sm font-bold text-white shadow-md transition-all hover:bg-[#00b396] active:scale-[0.98] flex items-center justify-center gap-1.5 whitespace-nowrap"
+          >
+            <Save size={15} className="flex-shrink-0" />
+            Зберегти зміни
           </button>
         </div>
       )}
