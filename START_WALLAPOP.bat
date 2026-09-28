@@ -15,7 +15,13 @@ for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":3000" ^| findstr "LISTENING
 
 echo.
 echo [2/6] Updating code from Git (git pull)...
+git checkout -- backend/dist backend/.chrome-profile backend/package-lock.json frontend/package-lock.json >nul 2>&1
 git pull
+if %errorlevel% neq 0 (
+    echo - Conflict detected. Resetting tracked files and retrying pull...
+    git reset --hard HEAD
+    git pull
+)
 
 echo.
 echo [3/6] Clearing cache (.next, dist)...
