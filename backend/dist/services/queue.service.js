@@ -201,7 +201,6 @@ class QueueService {
         }).catch(() => null);
         this.broadcast();
         const settings = await prisma_1.default.settings.findFirst();
-        const headless = settings?.headless ?? false;
         const cookiesPath = path.join(process.cwd(), '.session-cookies.json');
         const hasCookies = fs.existsSync(cookiesPath);
         if (!hasCookies && (!settings || !settings.wallapopEmail || !settings.wallapopPassword)) {
@@ -214,7 +213,8 @@ class QueueService {
             return { success: false, error: err };
         }
         try {
-            await browser_service_1.browserService.initialize(headless);
+            // Always initialize visible browser during publication as requested
+            await browser_service_1.browserService.initialize(false);
             const alreadyIn = await browser_service_1.browserService.isLoggedIn();
             if (!alreadyIn) {
                 if (settings?.wallapopEmail && settings?.wallapopPassword) {
@@ -286,19 +286,23 @@ class QueueService {
         try {
             // Load settings once
             let settings = await prisma_1.default.settings.findFirst();
-            if (!settings || !settings.wallapopEmail || !settings.wallapopPassword) {
-                console.error('[Queue] No credentials configured');
+            const cookiesPath = path.join(process.cwd(), '.session-cookies.json');
+            const hasCookies = fs.existsSync(cookiesPath);
+            if (!hasCookies && (!settings || !settings.wallapopEmail || !settings.wallapopPassword)) {
+                console.error('[Queue] No credentials or cookies configured');
                 return;
             }
-            // Initialize browser
+            // Initialize browser visibly
             try {
-                await browser_service_1.browserService.initialize(settings.headless);
+                await browser_service_1.browserService.initialize(false);
                 const alreadyIn = await browser_service_1.browserService.isLoggedIn();
                 if (!alreadyIn) {
-                    const ok = await browser_service_1.browserService.login(settings.wallapopEmail, settings.wallapopPassword);
-                    if (!ok) {
-                        console.error('[Queue] Login failed, aborting queue');
-                        return;
+                    if (settings?.wallapopEmail && settings?.wallapopPassword) {
+                        const ok = await browser_service_1.browserService.login(settings.wallapopEmail, settings.wallapopPassword);
+                        if (!ok) {
+                            console.error('[Queue] Login failed, aborting queue');
+                            return;
+                        }
                     }
                 }
             }

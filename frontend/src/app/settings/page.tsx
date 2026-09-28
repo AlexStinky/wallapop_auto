@@ -40,7 +40,7 @@ export default function SettingsPage() {
     resolver: zodResolver(schema),
     defaultValues: {
       publishDelay: 30,
-      headless: true,
+      headless: false,
     },
   });
 

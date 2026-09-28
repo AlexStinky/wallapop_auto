@@ -28,6 +28,7 @@ class BrowserService {
       '--disable-setuid-sandbox',
       '--disable-blink-features=AutomationControlled',
       '--disable-infobars',
+      ...(headless ? [] : ['--start-maximized']),
     ];
 
     try {
@@ -48,7 +49,7 @@ class BrowserService {
 
     this.context = await this.browser.newContext({
       userAgent: DESKTOP_UA,
-      viewport: { width: 1280, height: 800 },
+      viewport: headless ? { width: 1280, height: 800 } : null,
       locale: 'es-ES',
       timezoneId: 'Europe/Madrid',
       // Load saved cookies if they exist
@@ -66,6 +67,9 @@ class BrowserService {
     });
 
     this.page = await this.context.newPage();
+    if (!headless && this.page) {
+      await this.page.bringToFront().catch(() => null);
+    }
     console.log('[Browser] Initialized (headless=%s, desktop)', headless);
   }
 
@@ -256,10 +260,11 @@ class BrowserService {
 
   private async ensurePage(): Promise<Page> {
     if (!this.browser || !this.context) {
-      await this.initialize(this.isHeadless);
+      await this.initialize(false);
     }
     if (!this.page || this.page.isClosed()) {
       this.page = await this.context!.newPage();
+      await this.page.bringToFront().catch(() => null);
     }
     return this.page;
   }

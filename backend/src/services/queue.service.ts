@@ -190,7 +190,6 @@ class QueueService {
     this.broadcast();
 
     const settings = await prisma.settings.findFirst();
-    const headless = settings?.headless ?? false;
     const cookiesPath = path.join(process.cwd(), '.session-cookies.json');
     const hasCookies = fs.existsSync(cookiesPath);
 
@@ -205,7 +204,8 @@ class QueueService {
     }
 
     try {
-      await browserService.initialize(headless);
+      // Always initialize visible browser during publication as requested
+      await browserService.initialize(false);
       const alreadyIn = await browserService.isLoggedIn();
       if (!alreadyIn) {
         if (settings?.wallapopEmail && settings?.wallapopPassword) {
@@ -276,22 +276,26 @@ class QueueService {
     try {
       // Load settings once
       let settings = await prisma.settings.findFirst();
+      const cookiesPath = path.join(process.cwd(), '.session-cookies.json');
+      const hasCookies = fs.existsSync(cookiesPath);
 
-      if (!settings || !settings.wallapopEmail || !settings.wallapopPassword) {
-        console.error('[Queue] No credentials configured');
+      if (!hasCookies && (!settings || !settings.wallapopEmail || !settings.wallapopPassword)) {
+        console.error('[Queue] No credentials or cookies configured');
         return;
       }
 
-      // Initialize browser
+      // Initialize browser visibly
       try {
-        await browserService.initialize(settings.headless);
+        await browserService.initialize(false);
 
         const alreadyIn = await browserService.isLoggedIn();
         if (!alreadyIn) {
-          const ok = await browserService.login(settings.wallapopEmail, settings.wallapopPassword);
-          if (!ok) {
-            console.error('[Queue] Login failed, aborting queue');
-            return;
+          if (settings?.wallapopEmail && settings?.wallapopPassword) {
+            const ok = await browserService.login(settings.wallapopEmail, settings.wallapopPassword);
+            if (!ok) {
+              console.error('[Queue] Login failed, aborting queue');
+              return;
+            }
           }
         }
       } catch (err) {
