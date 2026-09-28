@@ -509,8 +509,8 @@ class BrowserService {
           const text = (el.innerText || el.textContent || '').trim();
           if (!text || text.length < 2 || text.length > 500) return;
 
-          // Never treat informational banners or loading states as errors
-          if (/revisa la informaci|hemos rellenado|detalles por ti|cargando|subiendo|guardando|loading|espera|por favor|procesando/i.test(text)) {
+          // Never treat informational banners, bulky promos, or loading states as errors
+          if (/revisa la informaci|hemos rellenado|detalles por ti|cargando|subiendo|guardando|loading|espera|por favor|procesando|productos voluminosos|servicio de env[ií]o|incluye recogida|el coste del servicio|ni lo notar[aá]s|bulky/i.test(text)) {
             return;
           }
 
@@ -519,9 +519,13 @@ class BrowserService {
           const cls = (typeof el.className === 'string' ? el.className : '') + ' ' + (el.getAttribute('class') || '');
           const tag = el.tagName.toLowerCase();
 
-          const isAlertRole = role === 'alert' || role === 'alertdialog' || role === 'status';
-          const isAlertTag = /toast|snackbar|banner|alert|notification|popup|modal/.test(tag);
-          const isAlertCls = /toast|snackbar|banner|alert|notification|popup|modal|danger|error/i.test(cls);
+          if (/bulky|shipping|header|info|help/i.test(tag) || /bulky|shipping|header|info|help/i.test(cls)) {
+            return;
+          }
+
+          const isAlertRole = role === 'alert' || role === 'alertdialog';
+          const isAlertTag = /toast|snackbar|alert|notification/.test(tag) && !/banner|bulky/i.test(tag);
+          const isAlertCls = /toast|snackbar|danger|error/i.test(cls) && !/bulky|banner/i.test(cls);
           const isRedStyled = isRedColor(style.backgroundColor) || isRedColor(style.color) || isRedColor(style.borderColor);
           const isFloating = (style.position === 'fixed' || style.position === 'absolute') && parseInt(style.zIndex || '0', 10) >= 10;
 
@@ -607,7 +611,7 @@ class BrowserService {
 
         function isIgnoredMessage(t: string): boolean {
           if (!t) return true;
-          return /revisa la informaci|hemos rellenado|detalles por ti|cargando|subiendo|guardando|loading|espera|por favor|procesando/i.test(t);
+          return /revisa la informaci|hemos rellenado|detalles por ti|cargando|subiendo|guardando|loading|espera|por favor|procesando|productos voluminosos|servicio de env[ií]o|incluye recogida|el coste del servicio|ni lo notar[aá]s|bulky/i.test(t);
         }
 
         // 1. Check real-time captured popups from MutationObserver (newest first)
@@ -623,26 +627,19 @@ class BrowserService {
           }
         }
 
-        // 2. Scan DOM (including shadow DOM) for visible popup / toast / snackbar / banner / alert
+        // 2. Scan DOM (including shadow DOM) for visible popup / toast / snackbar / alert
         const popupSelectors = [
           'walla-toast',
           'walla-snackbar',
-          'walla-banner',
           'walla-alert',
           'ts-snackbar',
           'ts-toast',
-          'ts-banner',
           '[role="alert"]',
           '[role="alertdialog"]',
           '[aria-live="assertive"]',
           '[class*="toast" i]',
           '[class*="snackbar" i]',
-          '[class*="banner" i]',
-          '[class*="alert" i]',
-          '[class*="notification" i]',
-          '[class*="popover" i]',
-          '[class*="popup" i]',
-          '[class*="modal" i]',
+          '[class*="alert" i]:not([class*="shipping" i]):not([class*="bulky" i])',
           '[class*="danger" i]',
           '[class*="error" i]',
           '[class*="feedback" i]',
@@ -1685,9 +1682,14 @@ class BrowserService {
       while (Date.now() - pollStart < maxWaitMs) {
         await page.waitForTimeout(600);
 
-        // 1. Check if a real red popup / toast or validation error appeared (not "Cargando...")
+        // 1. Check if a real red popup / toast or validation error appeared (not "Cargando..." or bulky promo)
         const errorPopup = await this.getRedPopupOrErrorText(page);
-        if (errorPopup && !/cargando|loading|subiendo|guardando|espera|procesando/i.test(errorPopup)) {
+        if (
+          errorPopup &&
+          !/cargando|loading|subiendo|guardando|espera|procesando|productos voluminosos|servicio de env[ií]o|incluye recogida|el coste del servicio|ni lo notar[aá]s/i.test(
+            errorPopup
+          )
+        ) {
           console.warn('[Browser] Detected error popup: "%s"', errorPopup);
           finalError = errorPopup;
           await page.waitForTimeout(800);
@@ -1737,7 +1739,12 @@ class BrowserService {
 
       // Final check
       const lastCheckError = (await this.getRedPopupOrErrorText(page)) || lastNetworkError;
-      if (lastCheckError && !/cargando|loading|subiendo|guardando|espera|procesando/i.test(lastCheckError)) {
+      if (
+        lastCheckError &&
+        !/cargando|loading|subiendo|guardando|espera|procesando|productos voluminosos|servicio de env[ií]o|incluye recogida|el coste del servicio|ni lo notar[aá]s/i.test(
+          lastCheckError
+        )
+      ) {
         await this.screenshot(`publish-error-${product.id}`);
         return { success: false, error: lastCheckError };
       }
