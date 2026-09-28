@@ -22,7 +22,10 @@ console.log('[Server] Uploads directory:', UPLOAD_DIR);
 
 app.use(
   cors({
-    origin: [FRONTEND_URL, 'http://localhost:3000', 'http://127.0.0.1:3000'],
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps, curl, server-to-server) or any local network / localhost origin
+      callback(null, true);
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],

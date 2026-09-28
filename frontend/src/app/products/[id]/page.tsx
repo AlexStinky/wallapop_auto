@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { ArrowLeft, Edit, Send, Trash2, ExternalLink, AlertCircle, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
-import { Product, getProduct, publishProductNow, deleteProduct } from '@/lib/api';
+import { Product, getProduct, publishProductNow, deleteProduct, getApiBaseUrl } from '@/lib/api';
 import { StatusBadge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -58,7 +58,7 @@ export default function ProductDetailPage() {
   const [currentImage, setCurrentImage] = useState(0);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+  const apiUrl = getApiBaseUrl();
 
   useEffect(() => {
     const fetch = async () => {

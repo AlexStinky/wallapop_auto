@@ -1,10 +1,27 @@
 import axios from 'axios';
 
+export function getApiBaseUrl(): string {
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL;
+  }
+  if (typeof window !== 'undefined') {
+    return `http://${window.location.hostname}:3001`;
+  }
+  return 'http://localhost:3001';
+}
+
 const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001',
+  baseURL: getApiBaseUrl(),
   headers: {
     'Content-Type': 'application/json',
   },
+});
+
+api.interceptors.request.use((config) => {
+  if (typeof window !== 'undefined' && !process.env.NEXT_PUBLIC_API_URL) {
+    config.baseURL = `http://${window.location.hostname}:3001`;
+  }
+  return config;
 });
 
 // ─── Types ────────────────────────────────────────────────────────────────────

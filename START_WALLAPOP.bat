@@ -35,9 +35,10 @@ call npm install
 call npm run build
 
 echo.
-echo [5/6] Updating Frontend dependencies (npm install)...
+echo [5/6] Updating Frontend dependencies (npm install) and building...
 cd /d %~dp0frontend
 call npm install
+call npm run build
 
 cd /d %~dp0
 
