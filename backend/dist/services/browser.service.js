@@ -386,113 +386,6 @@ class BrowserService {
             // Ignore
         }
     }
-    async selectEstandarPackageTypeIfPresent(page) {
-        try {
-            console.log('[Browser] Checking for "Estándar / Voluminoso" package type selector...');
-            // 1. Playwright locators for Estándar option
-            const estandarLocator = page
-                .locator('text=/Est[aá]ndar:?\\s*productos peque[ñn]os/i')
-                .or(page.locator('label').filter({ hasText: /Est[aá]ndar.*productos peque[ñn]os/i }))
-                .or(page.getByRole('radio', { name: /Est[aá]ndar/i }))
-                .first();
-            let clicked = false;
-            if (await estandarLocator.isVisible({ timeout: 2000 }).catch(() => false)) {
-                console.log('[Browser] Found "Estándar" package option via locator, clicking...');
-                await estandarLocator.scrollIntoViewIfNeeded();
-                await estandarLocator.click({ force: true }).catch(() => null);
-                clicked = true;
-                await this.randomDelay(400, 800);
-            }
-            // 2. Comprehensive deep DOM evaluation & radio check (handles Shadow DOM & custom elements)
-            const evaluated = await page.evaluate(() => {
-                function queryAllDeep(selector, root = document) {
-                    let results = Array.from(root.querySelectorAll(selector));
-                    const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
-                    while (walker.nextNode()) {
-                        const node = walker.currentNode;
-                        if (node.shadowRoot) {
-                            results = results.concat(queryAllDeep(selector, node.shadowRoot));
-                        }
-                    }
-                    return results;
-                }
-                const allEls = queryAllDeep('*');
-                const estandarCandidate = allEls.find((el) => {
-                    if (el.children.length > 3)
-                        return false;
-                    const txt = (el.textContent || '').trim();
-                    return /Est[aá]ndar/i.test(txt) && /peque[ñn]os|medianos/i.test(txt);
-                }) || allEls.find((el) => {
-                    if (el.children.length > 2)
-                        return false;
-                    const txt = (el.textContent || '').trim();
-                    return /^Est[aá]ndar\b/i.test(txt) && !/voluminoso/i.test(txt);
-                });
-                const hasVoluminoso = allEls.some((el) => {
-                    const txt = (el.textContent || '').trim();
-                    return /Voluminoso.*productos grandes/i.test(txt) || /Cuánto mide el producto/i.test(txt);
-                });
-                if (!estandarCandidate && !hasVoluminoso) {
-                    return false;
-                }
-                function triggerSelect(target) {
-                    target.scrollIntoView({ block: 'center' });
-                    if (target.type === 'radio') {
-                        const r = target;
-                        r.checked = true;
-                        r.click();
-                        r.dispatchEvent(new Event('input', { bubbles: true }));
-                        r.dispatchEvent(new Event('change', { bubbles: true }));
-                        return true;
-                    }
-                    target.click();
-                    target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-                    return true;
-                }
-                if (estandarCandidate) {
-                    const container = estandarCandidate.closest('walla-radio, label, [role="radio"], [class*="option"], [class*="card"], [class*="cell"], [class*="row"], [class*="item"]') || estandarCandidate.parentElement;
-                    const radio = container?.querySelector('input[type="radio"]')
-                        || estandarCandidate.parentElement?.querySelector('input[type="radio"]');
-                    if (radio) {
-                        triggerSelect(radio);
-                        return true;
-                    }
-                    const roleRadio = container?.querySelector('[role="radio"]')
-                        || estandarCandidate.parentElement?.querySelector('[role="radio"]');
-                    if (roleRadio) {
-                        triggerSelect(roleRadio);
-                        return true;
-                    }
-                    triggerSelect(container || estandarCandidate);
-                    return true;
-                }
-                const radios = queryAllDeep('input[type="radio"], [role="radio"]');
-                for (const r of radios) {
-                    const parent = r.closest('label, div, section, tr, [class*="row"]') || r.parentElement;
-                    const txt = ((r.getAttribute('aria-label') || '') + ' ' + (parent?.textContent || '')).trim();
-                    if (/Est[aá]ndar/i.test(txt) && !/voluminoso/i.test(txt)) {
-                        triggerSelect(r);
-                        return true;
-                    }
-                }
-                if (radios.length >= 2) {
-                    triggerSelect(radios[0]);
-                    return true;
-                }
-                return false;
-            }).catch(() => false);
-            if (clicked || evaluated) {
-                console.log('[Browser] Successfully selected "Estándar" package option.');
-                await this.randomDelay(600, 1200);
-                return true;
-            }
-            return false;
-        }
-        catch (e) {
-            console.warn('[Browser] Error selecting Estándar option:', e);
-            return false;
-        }
-    }
     async setupErrorObserver(page) {
         try {
             await page.evaluate(() => {
@@ -1379,7 +1272,7 @@ class BrowserService {
                 '2-5kg': ['2 a 5 kg', '2 - 5 kg', 'De 2 a 5 kg', 'Mediano', 'Mediana', '2-5 kg'],
                 '5-10kg': ['5 a 10 kg', '5 - 10 kg', 'De 5 a 10 kg', 'Grande', '5-10 kg'],
                 '10-20kg': ['10 a 20 kg', '10 - 20 kg', 'Extra grande', '10-20 kg'],
-                '20-30kg': ['20 a 30 kg', '20 - 30 kg', 'De 20 a 30 kg', '20-30 kg'],
+                '20-30kg': ['20 a 30 kg', '20 - 30 kg', 'Voluminoso', '20-30 kg'],
             };
             const weightIndexMap = {
                 '0-1kg': 0,
@@ -1401,8 +1294,6 @@ class BrowserService {
                 ? weightIndexMap[product.weight]
                 : 0;
             console.log('[Browser] Handling package size / weight: %s (preferred labels: %s, index: %d)', product.weight || 'default', targetWeightLabels.join(', '), targetWeightIndex);
-            // Phase 0: If "Estándar vs Voluminoso" option is present on screen, select "Estándar"
-            await this.selectEstandarPackageTypeIfPresent(page);
             // Phase 1: Scroll down towards shipping / size section
             const shippingSectionEl = page
                 .locator('text=/Elige un tama[ñn]o|detalle necesario para activar la opci[oó]n de env[ií]o|Opciones de env[ií]o|¿Cu[aá]nto pesa\?|Tama[ñn]o del paquete/i')
@@ -1411,8 +1302,6 @@ class BrowserService {
                 await shippingSectionEl.scrollIntoViewIfNeeded();
                 await this.randomDelay(400, 700);
             }
-            // Check again after scrolling to shipping section
-            await this.selectEstandarPackageTypeIfPresent(page);
             // Phase 2: Check if "Elige un tamaño" or shipping dropdown needs to be clicked/opened first
             let sizeSelectorOpened = false;
             const sizeTrigger = page
@@ -1429,7 +1318,6 @@ class BrowserService {
                 await sizeTrigger.click({ force: true }).catch(() => null);
                 sizeSelectorOpened = true;
                 await this.randomDelay(800, 1500);
-                await this.selectEstandarPackageTypeIfPresent(page);
             }
             else {
                 // Deep search for clickable element containing "Elige un tamaño"
@@ -1461,7 +1349,6 @@ class BrowserService {
                 if (sizeSelectorOpened) {
                     console.log('[Browser] Deep-clicked "Elige un tamaño" element.');
                     await this.randomDelay(800, 1500);
-                    await this.selectEstandarPackageTypeIfPresent(page);
                 }
             }
             // Phase 3: Select the target size/weight option
@@ -1570,16 +1457,6 @@ class BrowserService {
                 await this.randomDelay(400, 800);
             }
             await this.randomDelay(800, 1500);
-            // Pre-publish verification: ensure "Estándar" is selected, never "Voluminoso"
-            const hasBulkyMeasurements = await page.evaluate(() => {
-                const text = document.body.innerText || '';
-                return /Cuánto mide el producto|Toca medir|Ancho.*Fondo.*Alto/i.test(text);
-            }).catch(() => false);
-            if (hasBulkyMeasurements) {
-                console.warn('[Browser] Bulky dimensions form detected! Forcing switch to "Estándar"...');
-                await this.selectEstandarPackageTypeIfPresent(page);
-                await this.randomDelay(600, 1200);
-            }
             // ── Step 8: Final Publish Button ──────────────────────────────────────
             await this.randomDelay(1000, 2000);
             const publishBtn = page
