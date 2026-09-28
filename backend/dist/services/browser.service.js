@@ -391,6 +391,78 @@ class BrowserService {
             // Ignore
         }
     }
+    async selectEstandarShipping(page) {
+        try {
+            console.log('[Browser] Checking for "Tamaño del producto" (Estándar vs Voluminoso) shipping section...');
+            // 1. Check if the block is present on the page via selector
+            const standardSelector = page
+                .locator('input#delivery, walla-radio[arialabel="delivery"], #standardDescription1, #standardShippingIcon')
+                .first();
+            const isVisible = await standardSelector.isVisible({ timeout: 2500 }).catch(() => false);
+            const isPresentInDom = isVisible || await page.evaluate(() => {
+                return Boolean(document.querySelector('input#delivery, walla-radio[arialabel="delivery"], #standardDescription1, #itemSizeTitle'));
+            }).catch(() => false);
+            if (!isPresentInDom) {
+                console.log('[Browser] Estándar shipping block not detected on page.');
+                return false;
+            }
+            console.log('[Browser] Found Estándar shipping block. Ensuring "Estándar" (#delivery) is selected...');
+            await standardSelector.scrollIntoViewIfNeeded().catch(() => null);
+            // 2. Select via deep DOM evaluation
+            const selected = await page.evaluate(() => {
+                function queryAllDeep(selector, root = document) {
+                    let results = Array.from(root.querySelectorAll(selector));
+                    const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+                    while (walker.nextNode()) {
+                        const node = walker.currentNode;
+                        if (node.shadowRoot) {
+                            results = results.concat(queryAllDeep(selector, node.shadowRoot));
+                        }
+                    }
+                    return results;
+                }
+                const deliveryRadio = (document.querySelector('input#delivery') ||
+                    queryAllDeep('input#delivery')[0] ||
+                    queryAllDeep('walla-radio[arialabel="delivery"] input[type="radio"]')[0]);
+                const deliveryWrapper = (document.querySelector('walla-radio[arialabel="delivery"]') ||
+                    queryAllDeep('walla-radio[arialabel="delivery"]')[0]);
+                const standardText = document.querySelector('#standardDescription1');
+                const standardIcon = document.querySelector('#standardShippingIcon');
+                if (deliveryRadio && deliveryRadio.checked) {
+                    return true; // Already selected
+                }
+                // Trigger clicks on text, icon, and web component host
+                if (standardText)
+                    standardText.click();
+                if (standardIcon)
+                    standardIcon.click();
+                if (deliveryWrapper)
+                    deliveryWrapper.click();
+                if (deliveryRadio) {
+                    deliveryRadio.checked = true;
+                    deliveryRadio.click();
+                    deliveryRadio.dispatchEvent(new Event('input', { bubbles: true }));
+                    deliveryRadio.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                return true;
+            }).catch(() => false);
+            // 3. Playwright click fallback directly on the radio wrapper or input
+            try {
+                const radio = page.locator('walla-radio[arialabel="delivery"], input#delivery, #standardDescription1').first();
+                if (await radio.isVisible().catch(() => false)) {
+                    await radio.click({ force: true }).catch(() => null);
+                }
+            }
+            catch (_) { }
+            console.log('[Browser] "Estándar" selected. Waiting for weight/size options to appear...');
+            await this.randomDelay(1500, 2500);
+            return selected;
+        }
+        catch (e) {
+            console.warn('[Browser] Error selecting Estándar:', e);
+            return false;
+        }
+    }
     async setupErrorObserver(page) {
         try {
             await page.evaluate(() => {
@@ -1277,7 +1349,7 @@ class BrowserService {
                 '2-5kg': ['2 a 5 kg', '2 - 5 kg', 'De 2 a 5 kg', 'Mediano', 'Mediana', '2-5 kg'],
                 '5-10kg': ['5 a 10 kg', '5 - 10 kg', 'De 5 a 10 kg', 'Grande', '5-10 kg'],
                 '10-20kg': ['10 a 20 kg', '10 - 20 kg', 'Extra grande', '10-20 kg'],
-                '20-30kg': ['20 a 30 kg', '20 - 30 kg', 'Voluminoso', '20-30 kg'],
+                '20-30kg': ['20 a 30 kg', '20 - 30 kg', 'De 20 a 30 kg', '20-30 kg'],
             };
             const weightIndexMap = {
                 '0-1kg': 0,
@@ -1299,14 +1371,16 @@ class BrowserService {
                 ? weightIndexMap[product.weight]
                 : 0;
             console.log('[Browser] Handling package size / weight: %s (preferred labels: %s, index: %d)', product.weight || 'default', targetWeightLabels.join(', '), targetWeightIndex);
-            // Phase 1: Scroll down towards shipping / size section
+            // Phase 0: Scroll down towards shipping / size section
             const shippingSectionEl = page
-                .locator('text=/Elige un tama[ñn]o|detalle necesario para activar la opci[oó]n de env[ií]o|Opciones de env[ií]o|¿Cu[aá]nto pesa\?|Tama[ñn]o del paquete/i')
+                .locator('#itemSizeTitle, #standardDescription1, input#delivery, text=/Tamaño del producto|Elige un tama[ñn]o|detalle necesario para activar la opci[oó]n de env[ií]o|Opciones de env[ií]o|¿Cu[aá]nto pesa\?|Tama[ñn]o del paquete/i')
                 .first();
             if (await shippingSectionEl.isVisible({ timeout: 5000 }).catch(() => false)) {
                 await shippingSectionEl.scrollIntoViewIfNeeded();
                 await this.randomDelay(400, 700);
             }
+            // Phase 1: FIRST choose "Estándar" if present ("в котором нужно выбрать Estándar после чего нужно выбрать вес")
+            await this.selectEstandarShipping(page);
             // Phase 2: Check if "Elige un tamaño" or shipping dropdown needs to be clicked/opened first
             let sizeSelectorOpened = false;
             const sizeTrigger = page
@@ -1462,6 +1536,8 @@ class BrowserService {
                 await this.randomDelay(400, 800);
             }
             await this.randomDelay(800, 1500);
+            // Ensure "Estándar" (#delivery) remains selected before clicking Publicar
+            await this.selectEstandarShipping(page);
             // ── Step 8: Final Publish Button ──────────────────────────────────────
             await this.randomDelay(1000, 2000);
             const publishBtn = page
