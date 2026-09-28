@@ -1343,14 +1343,14 @@ class BrowserService {
         }
       }
 
-      // ── Step 7.5: Weight / Shipping ("¿Cuánto pesa?") ─────────────────────
-      const weightMap: Record<string, string> = {
-        '0-1kg': '0 a 1 kg',
-        '1-2kg': '1 a 2 kg',
-        '2-5kg': '2 a 5 kg',
-        '5-10kg': '5 a 10 kg',
-        '10-20kg': '10 a 20 kg',
-        '20-30kg': '20 a 30 kg',
+      // ── Step 7.5: Weight / Package Size / Shipping ("Elige un tamaño" / "¿Cuánto pesa?") ────
+      const weightLabelsMap: Record<string, string[]> = {
+        '0-1kg': ['0 a 1 kg', '0 - 1 kg', 'Hasta 2 kg', '0 a 2 kg', '0 - 2 kg', 'Pequeño', 'Pequeña', '1 a 2 kg', '1 - 2 kg'],
+        '1-2kg': ['1 a 2 kg', '1 - 2 kg', 'Hasta 2 kg', '0 a 2 kg', '0 - 2 kg', '0 a 1 kg', 'Pequeño'],
+        '2-5kg': ['2 a 5 kg', '2 - 5 kg', 'De 2 a 5 kg', 'Mediano', 'Mediana', '2-5 kg'],
+        '5-10kg': ['5 a 10 kg', '5 - 10 kg', 'De 5 a 10 kg', 'Grande', '5-10 kg'],
+        '10-20kg': ['10 a 20 kg', '10 - 20 kg', 'Extra grande', '10-20 kg'],
+        '20-30kg': ['20 a 30 kg', '20 - 30 kg', 'Voluminoso', '20-30 kg'],
       };
       const weightIndexMap: Record<string, number> = {
         '0-1kg': 0,
@@ -1361,93 +1361,194 @@ class BrowserService {
         '20-30kg': 5,
       };
 
-      const targetWeightLabel = (product.weight && weightMap[product.weight]) || '0 a 1 kg';
+      const targetWeightLabels = weightLabelsMap[product.weight || ''] || [
+        '0 a 1 kg',
+        'Hasta 2 kg',
+        '0 a 2 kg',
+        'Pequeño',
+        '1 a 2 kg',
+        '2 a 5 kg',
+      ];
       const targetWeightIndex = (product.weight && weightIndexMap[product.weight] !== undefined)
         ? weightIndexMap[product.weight]
         : 0;
 
-      console.log('[Browser] Selecting weight: "%s" (index: %d)', targetWeightLabel, targetWeightIndex);
+      console.log('[Browser] Handling package size / weight: %s (preferred labels: %s, index: %d)',
+        product.weight || 'default', targetWeightLabels.join(', '), targetWeightIndex);
 
-      // Scroll to shipping section
-      const shippingHeader = page.locator('text=/Opciones de env[ií]o|¿Cuánto pesa\?/i').first();
-      if (await shippingHeader.isVisible({ timeout: 5000 }).catch(() => false)) {
-        await shippingHeader.scrollIntoViewIfNeeded();
-        await this.randomDelay(500, 800);
+      // Phase 1: Scroll down towards shipping / size section
+      const shippingSectionEl = page
+        .locator('text=/Elige un tama[ñn]o|detalle necesario para activar la opci[oó]n de env[ií]o|Opciones de env[ií]o|¿Cu[aá]nto pesa\?|Tama[ñn]o del paquete/i')
+        .first();
+      if (await shippingSectionEl.isVisible({ timeout: 5000 }).catch(() => false)) {
+        await shippingSectionEl.scrollIntoViewIfNeeded();
+        await this.randomDelay(400, 700);
       }
 
-      // Method 1: Real Playwright mouse click on visible weight label
-      let weightClicked = false;
-      try {
-        const weightTextEl = page.getByText(targetWeightLabel, { exact: false }).first();
-        if (await weightTextEl.isVisible({ timeout: 3000 }).catch(() => false)) {
-          await weightTextEl.scrollIntoViewIfNeeded();
-          await weightTextEl.click({ force: true });
-          console.log('[Browser] Clicked weight label text: "%s"', targetWeightLabel);
-          weightClicked = true;
-          await this.randomDelay(400, 800);
+      // Phase 2: Check if "Elige un tamaño" or shipping dropdown needs to be clicked/opened first
+      let sizeSelectorOpened = false;
+      const sizeTrigger = page
+        .locator('walla-dropdown')
+        .filter({ hasText: /tama[ñn]o|env[ií]o|peso|cu[aá]nto pesa/i })
+        .locator('div[role="button"], .walla-dropdown__inner-input, [class*="inner"]')
+        .or(page.locator('walla-dropdown[label*="tamaño" i], walla-dropdown[label*="envío" i], walla-dropdown[label*="peso" i]').locator('div[role="button"], .walla-dropdown__inner-input, [class*="inner"]'))
+        .or(page.locator('text=/Elige un tama[ñn]o/i'))
+        .or(page.locator('text=/detalle necesario para activar la opci[oó]n de env[ií]o/i'))
+        .first();
 
-          // Also click the row container
-          const rowEl = weightTextEl.locator('xpath=ancestor::*[contains(@class, "item") or contains(@class, "cell") or contains(@class, "row") or contains(@class, "radio") or @role="radio" or self::label or self::button or self::li] | ..').first();
-          if (await rowEl.isVisible().catch(() => false)) {
-            await rowEl.click({ force: true }).catch(() => null);
-            await this.randomDelay(300, 600);
+      if (await sizeTrigger.isVisible({ timeout: 3000 }).catch(() => false)) {
+        console.log('[Browser] Clicking "Elige un tamaño" / shipping selector to open options...');
+        await sizeTrigger.scrollIntoViewIfNeeded();
+        await sizeTrigger.click({ force: true }).catch(() => null);
+        sizeSelectorOpened = true;
+        await this.randomDelay(800, 1500);
+      } else {
+        // Deep search for clickable element containing "Elige un tamaño"
+        sizeSelectorOpened = await page.evaluate(() => {
+          function queryAllDeep(selector: string, root: Document | Element | ShadowRoot = document): Element[] {
+            let results = Array.from(root.querySelectorAll(selector));
+            const walker = document.createTreeWalker(root as Node, NodeFilter.SHOW_ELEMENT);
+            while (walker.nextNode()) {
+              const node = walker.currentNode as Element;
+              if (node.shadowRoot) {
+                results = results.concat(queryAllDeep(selector, node.shadowRoot));
+              }
+            }
+            return results;
           }
-        }
-      } catch (e) {
-        console.warn('[Browser] Error clicking weight label:', e);
-      }
 
-      // Method 2: Native Playwright check on nth radio input
-      try {
-        const radioNth = page.locator('input[type="radio"]').nth(targetWeightIndex);
-        if (await radioNth.isVisible({ timeout: 2000 }).catch(() => false)) {
-          await radioNth.scrollIntoViewIfNeeded();
-          await radioNth.check({ force: true });
-          console.log('[Browser] Checked radio input directly at index %d', targetWeightIndex);
-          weightClicked = true;
-          await this.randomDelay(300, 600);
-        }
-      } catch (_) {}
-
-      // Method 3: Deep Shadow DOM traversal in browser evaluate
-      await page.evaluate(({ label, index }: { label: string; index: number }) => {
-        function queryAllDeep(selector: string, root: Document | Element | ShadowRoot = document): Element[] {
-          let results = Array.from(root.querySelectorAll(selector));
-          const walker = document.createTreeWalker(root as Node, NodeFilter.SHOW_ELEMENT);
-          while (walker.nextNode()) {
-            const node = walker.currentNode as Element;
-            if (node.shadowRoot) {
-              results = results.concat(queryAllDeep(selector, node.shadowRoot));
+          const allEls = queryAllDeep('*');
+          for (const el of allEls) {
+            const txt = (el.textContent || '').trim().toLowerCase();
+            if (txt.includes('elige un tamaño') || txt.includes('activar la opción de envío')) {
+              // Click container or button
+              const btn = (el.closest('walla-dropdown, div[role="button"], button, [class*="card"], [class*="cell"], [class*="row"]') as HTMLElement) || (el as HTMLElement);
+              btn.scrollIntoView({ block: 'center' });
+              btn.click();
+              return true;
             }
           }
-          return results;
-        }
+          return false;
+        }).catch(() => false);
 
-        // 1. Click text / label element
-        const allElements = queryAllDeep('*');
-        for (const el of allElements) {
-          const t = (el.textContent || '').trim().toLowerCase();
-          if (t === label.toLowerCase() || t.startsWith(label.toLowerCase())) {
-            (el as HTMLElement).scrollIntoView({ block: 'center' });
-            (el as HTMLElement).click();
-            el.parentElement?.click();
-            break;
+        if (sizeSelectorOpened) {
+          console.log('[Browser] Deep-clicked "Elige un tamaño" element.');
+          await this.randomDelay(800, 1500);
+        }
+      }
+
+      // Phase 3: Select the target size/weight option
+      let sizeSelected = false;
+
+      // 3A: Playwright locators for open dropdown / modal / bottom-sheet items
+      for (const label of targetWeightLabels) {
+        const optionEl = page
+          .locator('walla-floating-area:not([class*="hidden"]) walla-dropdown-item, walla-dropdown-item, [role="option"], [role="radio"], .walla-dropdown-item')
+          .filter({ hasText: new RegExp(label.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'), 'i') })
+          .or(page.getByText(label, { exact: false }))
+          .first();
+
+        if (await optionEl.isVisible({ timeout: 1500 }).catch(() => false)) {
+          console.log('[Browser] Found size/weight option: "%s"', label);
+          await optionEl.scrollIntoViewIfNeeded();
+          await optionEl.click({ force: true });
+          sizeSelected = true;
+          await this.randomDelay(500, 900);
+          break;
+        }
+      }
+
+      // 3B: If radio button is present
+      if (!sizeSelected) {
+        try {
+          const radioNth = page.locator('input[type="radio"]').nth(targetWeightIndex);
+          if (await radioNth.isVisible({ timeout: 1500 }).catch(() => false)) {
+            await radioNth.scrollIntoViewIfNeeded();
+            await radioNth.check({ force: true });
+            console.log('[Browser] Checked radio input directly at index %d', targetWeightIndex);
+            sizeSelected = true;
+            await this.randomDelay(400, 800);
           }
-        }
+        } catch (_) {}
+      }
 
-        // 2. Click radio element
-        const radios = queryAllDeep('input[type="radio"]') as HTMLInputElement[];
-        if (radios.length > index) {
-          const r = radios[index];
-          r.scrollIntoView({ block: 'center' });
-          r.click();
-          r.checked = true;
-          r.dispatchEvent(new Event('change', { bubbles: true }));
-          r.dispatchEvent(new Event('input', { bubbles: true }));
-          r.closest('label')?.click();
-          (r.parentElement as HTMLElement)?.click();
+      // 3C: Deep shadow DOM traversal evaluate
+      if (!sizeSelected) {
+        sizeSelected = await page.evaluate(({ labels, index }: { labels: string[]; index: number }) => {
+          function queryAllDeep(selector: string, root: Document | Element | ShadowRoot = document): Element[] {
+            let results = Array.from(root.querySelectorAll(selector));
+            const walker = document.createTreeWalker(root as Node, NodeFilter.SHOW_ELEMENT);
+            while (walker.nextNode()) {
+              const node = walker.currentNode as Element;
+              if (node.shadowRoot) {
+                results = results.concat(queryAllDeep(selector, node.shadowRoot));
+              }
+            }
+            return results;
+          }
+
+          // Search in options, buttons, labels
+          const candidates = queryAllDeep('walla-dropdown-item, [role="option"], [role="radio"], label, button, li, .walla-item');
+          for (const label of labels) {
+            const match = candidates.find((el) => {
+              const t = (el.textContent || '').trim().toLowerCase();
+              return t.includes(label.toLowerCase());
+            });
+            if (match) {
+              (match as HTMLElement).scrollIntoView({ block: 'center' });
+              (match as HTMLElement).click();
+              match.parentElement?.click();
+              return true;
+            }
+          }
+
+          // If radios exist
+          const radios = queryAllDeep('input[type="radio"]') as HTMLInputElement[];
+          if (radios.length > index) {
+            const r = radios[index];
+            r.scrollIntoView({ block: 'center' });
+            r.click();
+            r.checked = true;
+            r.dispatchEvent(new Event('change', { bubbles: true }));
+            r.dispatchEvent(new Event('input', { bubbles: true }));
+            r.closest('label')?.click();
+            return true;
+          }
+
+          // Or any element containing weight string
+          const all = queryAllDeep('*');
+          for (const label of labels) {
+            const el = all.find((e) => {
+              if (e.children.length > 2) return false;
+              const t = (e.textContent || '').trim().toLowerCase();
+              return t === label.toLowerCase() || t.startsWith(label.toLowerCase());
+            });
+            if (el) {
+              (el as HTMLElement).scrollIntoView({ block: 'center' });
+              (el as HTMLElement).click();
+              el.parentElement?.click();
+              return true;
+            }
+          }
+          return false;
+        }, { labels: targetWeightLabels, index: targetWeightIndex }).catch(() => false);
+
+        if (sizeSelected) {
+          console.log('[Browser] Deep-selected size option successfully.');
+          await this.randomDelay(500, 900);
         }
-      }, { label: targetWeightLabel, index: targetWeightIndex }).catch(() => null);
+      }
+
+      // Phase 4: If there is an "Aplicar" / "Guardar" / "Aceptar" button in the modal/sheet, click it
+      const modalConfirmBtn = page
+        .locator('walla-dialog, walla-modal, [class*="modal"], [class*="drawer"], [class*="sheet"], walla-floating-area')
+        .locator('button:has-text("Guardar"), button:has-text("Aplicar"), button:has-text("Aceptar"), button:has-text("Confirmar")')
+        .first();
+      if (await modalConfirmBtn.isVisible({ timeout: 1500 }).catch(() => false)) {
+        console.log('[Browser] Clicking modal confirmation button for size selection...');
+        await modalConfirmBtn.click({ force: true }).catch(() => null);
+        await this.randomDelay(400, 800);
+      }
 
       await this.randomDelay(800, 1500);
 
