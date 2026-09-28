@@ -509,8 +509,8 @@ class BrowserService {
           const text = (el.innerText || el.textContent || '').trim();
           if (!text || text.length < 2 || text.length > 500) return;
 
-          // Never treat informational banners, bulky promos, or loading states as errors
-          if (/revisa la informaci|hemos rellenado|detalles por ti|cargando|subiendo|guardando|loading|espera|por favor|procesando|productos voluminosos|servicio de env[ií]o|incluye recogida|el coste del servicio|ni lo notar[aá]s|bulky/i.test(text)) {
+          // Never treat informational banners, bulky promos, NUEVO badge, or loading states as errors
+          if (/^(nuevo|new)$/i.test(text) || /revisa la informaci|hemos rellenado|detalles por ti|cargando|subiendo|guardando|loading|espera|por favor|procesando|productos voluminosos|servicio de env[ií]o|incluye recogida|el coste del servicio|ni lo notar[aá]s|bulky|nuevo/i.test(text)) {
             return;
           }
 
@@ -519,7 +519,7 @@ class BrowserService {
           const cls = (typeof el.className === 'string' ? el.className : '') + ' ' + (el.getAttribute('class') || '');
           const tag = el.tagName.toLowerCase();
 
-          if (/bulky|shipping|header|info|help/i.test(tag) || /bulky|shipping|header|info|help/i.test(cls)) {
+          if (/bulky|shipping|header|info|help|badge/i.test(tag) || /bulky|shipping|header|info|help|badge/i.test(cls)) {
             return;
           }
 
@@ -529,7 +529,7 @@ class BrowserService {
           const isRedStyled = isRedColor(style.backgroundColor) || isRedColor(style.color) || isRedColor(style.borderColor);
           const isFloating = (style.position === 'fixed' || style.position === 'absolute') && parseInt(style.zIndex || '0', 10) >= 10;
 
-          if (isAlertRole || isAlertTag || (isAlertCls && (isRedStyled || isFloating)) || (isRedStyled && isFloating) || isRedColor(style.backgroundColor)) {
+          if (isAlertRole || isAlertTag || (isAlertCls && (isRedStyled || isFloating)) || (isRedStyled && isFloating)) {
             if (text.length > 2) {
               (window as any).__capturedPopups.push({
                 text,
@@ -611,7 +611,9 @@ class BrowserService {
 
         function isIgnoredMessage(t: string): boolean {
           if (!t) return true;
-          return /revisa la informaci|hemos rellenado|detalles por ti|cargando|subiendo|guardando|loading|espera|por favor|procesando|productos voluminosos|servicio de env[ií]o|incluye recogida|el coste del servicio|ni lo notar[aá]s|bulky/i.test(t);
+          const trimmed = t.trim();
+          if (/^(nuevo|new|ok|cerrar|close|ver|ayuda)$/i.test(trimmed)) return true;
+          return /revisa la informaci|hemos rellenado|detalles por ti|cargando|subiendo|guardando|loading|espera|por favor|procesando|productos voluminosos|servicio de env[ií]o|incluye recogida|el coste del servicio|ni lo notar[aá]s|bulky|\bnuevo\b/i.test(t);
         }
 
         // 1. Check real-time captured popups from MutationObserver (newest first)
@@ -669,25 +671,8 @@ class BrowserService {
           }
         }
 
-        // 3. Scan all elements for red background (e.g. red error card/banner)
+        // 3. Check inline field validation errors (e.g. "Campo obligatorio")
         const allElements = queryAllDeep('*');
-        for (const el of allElements) {
-          if (el.children.length > 4) continue;
-          const rect = el.getBoundingClientRect();
-          if (rect.width === 0 || rect.height === 0) continue;
-          const style = window.getComputedStyle(el);
-          if (style.display === 'none' || style.visibility === 'hidden') continue;
-
-          if (isRedColor(style.backgroundColor)) {
-            const text = cleanText((el as HTMLElement).innerText || el.textContent || '');
-            if (isIgnoredMessage(text)) continue;
-            if (text.length > 3 && text.length < 300) {
-              return text;
-            }
-          }
-        }
-
-        // 4. Check inline field validation errors (e.g. "Campo obligatorio")
         const fieldErrors: string[] = [];
         const errorElements = allElements.filter((el) => {
           if (el.children.length > 0) return false;
@@ -735,7 +720,7 @@ class BrowserService {
         return null;
       });
 
-      if (errorText && /cargando|subiendo|guardando|loading|espera|por favor|procesando/i.test(errorText)) {
+      if (errorText && /cargando|subiendo|guardando|loading|espera|por favor|procesando|productos voluminosos|servicio de env[ií]o|incluye recogida|el coste del servicio|ni lo notar[aá]s|\bnuevo\b/i.test(errorText)) {
         return null;
       }
       return errorText;
@@ -1682,11 +1667,11 @@ class BrowserService {
       while (Date.now() - pollStart < maxWaitMs) {
         await page.waitForTimeout(600);
 
-        // 1. Check if a real red popup / toast or validation error appeared (not "Cargando..." or bulky promo)
+        // 1. Check if a real red popup / toast or validation error appeared (not "Cargando...", bulky promo or "NUEVO" badge)
         const errorPopup = await this.getRedPopupOrErrorText(page);
         if (
           errorPopup &&
-          !/cargando|loading|subiendo|guardando|espera|procesando|productos voluminosos|servicio de env[ií]o|incluye recogida|el coste del servicio|ni lo notar[aá]s/i.test(
+          !/cargando|loading|subiendo|guardando|espera|procesando|productos voluminosos|servicio de env[ií]o|incluye recogida|el coste del servicio|ni lo notar[aá]s|\bnuevo\b|\bnew\b/i.test(
             errorPopup
           )
         ) {
@@ -1741,7 +1726,7 @@ class BrowserService {
       const lastCheckError = (await this.getRedPopupOrErrorText(page)) || lastNetworkError;
       if (
         lastCheckError &&
-        !/cargando|loading|subiendo|guardando|espera|procesando|productos voluminosos|servicio de env[ií]o|incluye recogida|el coste del servicio|ni lo notar[aá]s/i.test(
+        !/cargando|loading|subiendo|guardando|espera|procesando|productos voluminosos|servicio de env[ií]o|incluye recogida|el coste del servicio|ni lo notar[aá]s|\bnuevo\b|\bnew\b/i.test(
           lastCheckError
         )
       ) {
