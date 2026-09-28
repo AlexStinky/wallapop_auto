@@ -82,7 +82,7 @@ async function initDb(): Promise<void> {
           wallapopEmail: '',
           wallapopPassword: '',
           publishDelay: 30,
-          headless: true,
+          headless: false,
         },
       });
       console.log('[Server] Default settings created');
