@@ -69,6 +69,13 @@ export interface Settings {
   headless: boolean;
 }
 
+export interface NetworkInfo {
+  ip: string;
+  port: number;
+  url: string;
+  all: { name: string; ip: string }[];
+}
+
 export type CreateProductData = Omit<Product, 'id' | 'wallapopId' | 'errorMessage' | 'createdAt' | 'updatedAt'> & {
   status?: ProductStatus;
   publishNow?: boolean;
@@ -157,6 +164,11 @@ export async function importCookies(cookies: string): Promise<{ success: boolean
 
 export async function openBrowserForLogin(): Promise<{ success: boolean; message: string }> {
   const { data } = await api.post<{ success: boolean; message: string }>('/settings/open-browser');
+  return data;
+}
+
+export async function getNetworkInfo(): Promise<NetworkInfo> {
+  const { data } = await api.get<NetworkInfo>('/settings/network-info');
   return data;
 }
 

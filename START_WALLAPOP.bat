@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 title Wallapop Bot Launcher
 color 0A
 
@@ -8,6 +9,18 @@ echo ========================================================
 echo.
 
 cd /d %~dp0
+
+:: Try to quietly ensure firewall rules exist
+netsh advfirewall firewall add rule name="Wallapop Port 3000" dir=in action=allow protocol=TCP localport=3000 profile=any enable=yes >nul 2>&1
+netsh advfirewall firewall add rule name="Wallapop Port 3001" dir=in action=allow protocol=TCP localport=3001 profile=any enable=yes >nul 2>&1
+
+:: Detect local IP address dynamically
+set LOCAL_IP=
+for /f "delims=" %%a in ('powershell -NoProfile -Command "(Get-NetIPConfiguration | Where-Object { $_.IPv4DefaultGateway -ne $null } | Select-Object -ExpandProperty IPv4Address | Select-Object -ExpandProperty IPAddress -First 1)"') do set LOCAL_IP=%%a
+if "%LOCAL_IP%"=="" (
+    for /f "delims=" %%a in ('powershell -NoProfile -Command "(Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notmatch 'Loopback|vEthernet|Virtual|WSL' -and $_.IPAddress -notmatch '^127\.|^169\.254\.' } | Select-Object -ExpandProperty IPAddress -First 1)"') do set LOCAL_IP=%%a
+)
+if "%LOCAL_IP%"=="" set LOCAL_IP=localhost
 
 echo [1/6] Clearing ports 3000 and 3001...
 for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":3001" ^| findstr "LISTENING"') do taskkill /f /pid %%a >nul 2>&1
@@ -66,12 +79,18 @@ start http://localhost:3000
 
 echo.
 echo ========================================================
-echo   Wallapop Bot is RUNNING!
+echo   Wallapop Bot УСПЕШНО ЗАПУЩЕН!
 echo.
-echo   Local PC:   http://localhost:3000
-echo   Phone Wi-Fi: http://192.168.31.196:3000
+echo   Компьютер:         http://localhost:3000
+echo   Телефон (Wi-Fi):   http://%LOCAL_IP%:3000
 echo.
-echo   Press any key to STOP all services.
+echo   ------------------------------------------------------
+echo   ВАЖНО ДЛЯ ВХОДА С ТЕЛЕФОНА:
+echo   - Телефон должен быть подключен к этому же Wi-Fi!
+echo   - Если страница на телефоне не открывается, один раз
+echo     запустите ALLOW_FIREWALL.bat от имени администратора.
+echo.
+echo   Нажмите любую клавишу для ОСТАНОВКИ всех сервисов.
 echo ========================================================
 pause >nul
 

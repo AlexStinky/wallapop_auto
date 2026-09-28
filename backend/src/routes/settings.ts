@@ -1,3 +1,4 @@
+import * as os from 'os';
 import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import prisma from '../db/prisma';
@@ -29,6 +30,35 @@ router.get('/', async (_req: Request, res: Response, next: NextFunction) => {
   } catch (err) {
     next(err);
   }
+});
+
+// GET /api/settings/network-info
+router.get('/network-info', (_req: Request, res: Response) => {
+  const nets = os.networkInterfaces();
+  const addresses: { name: string; ip: string }[] = [];
+  for (const name of Object.keys(nets)) {
+    for (const net of nets[name] || []) {
+      if (net.family === 'IPv4' && !net.internal) {
+        addresses.push({ name, ip: net.address });
+      }
+    }
+  }
+  const filtered = addresses.filter(
+    (a) =>
+      !a.ip.startsWith('169.254.') &&
+      !a.ip.startsWith('192.168.56.') &&
+      !a.name.toLowerCase().includes('virtual') &&
+      !a.name.toLowerCase().includes('vethernet') &&
+      !a.name.toLowerCase().includes('loopback')
+  );
+  const primary = filtered[0] || addresses[0];
+  const ip = primary ? primary.ip : 'localhost';
+  res.json({
+    ip,
+    port: 3000,
+    url: `http://${ip}:3000`,
+    all: addresses,
+  });
 });
 
 // PUT /api/settings

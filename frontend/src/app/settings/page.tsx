@@ -4,8 +4,8 @@ import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Eye, EyeOff, AlertTriangle, Save, LogIn, ExternalLink, Key } from 'lucide-react';
-import { getSettings, updateSettings, testLogin, importCookies, openBrowserForLogin, Settings } from '@/lib/api';
+import { Eye, EyeOff, AlertTriangle, Save, LogIn, ExternalLink, Key, Smartphone, Copy } from 'lucide-react';
+import { getSettings, updateSettings, testLogin, importCookies, openBrowserForLogin, getNetworkInfo, Settings, NetworkInfo } from '@/lib/api';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -28,6 +28,7 @@ export default function SettingsPage() {
   const [importingCookies, setImportingCookies] = useState(false);
   const [cookiesText, setCookiesText] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [networkInfo, setNetworkInfo] = useState<NetworkInfo | null>(null);
 
   const {
     register,
@@ -49,8 +50,9 @@ export default function SettingsPage() {
   useEffect(() => {
     const fetch = async () => {
       try {
-        const data = await getSettings();
-        reset(data);
+        const [data, net] = await Promise.allSettled([getSettings(), getNetworkInfo()]);
+        if (data.status === 'fulfilled') reset(data.value);
+        if (net.status === 'fulfilled') setNetworkInfo(net.value);
       } catch {
         // Backend not running; use defaults
       } finally {
@@ -269,6 +271,60 @@ export default function SettingsPage() {
                   }`}
                 />
               </button>
+            </div>
+          </Card>
+        </div>
+
+        {/* Mobile / Wi-Fi Access */}
+        <div>
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">
+            Доступ з телефону (Wi-Fi)
+          </h2>
+          <Card className="flex flex-col gap-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#00C9A7]/10 text-[#00A88B]">
+                <Smartphone size={22} />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-gray-800">Керування з телефону</p>
+                <p className="text-xs text-gray-400">У тій самій мережі Wi-Fi</p>
+              </div>
+            </div>
+
+            {networkInfo ? (
+              <div className="flex flex-col gap-2 rounded-xl bg-gray-50 p-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-gray-500">Адреса для телефону:</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(networkInfo.url);
+                      toast.success('Посилання скопійовано!');
+                    }}
+                    className="flex items-center gap-1 text-xs font-semibold text-[#00A88B] hover:underline"
+                  >
+                    <Copy size={13} />
+                    Скопіювати
+                  </button>
+                </div>
+                <a
+                  href={networkInfo.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="break-all font-mono text-sm font-semibold text-gray-900 hover:text-[#00A88B]"
+                >
+                  {networkInfo.url}
+                </a>
+              </div>
+            ) : null}
+
+            <div className="rounded-xl border border-gray-100 bg-white p-3 text-xs text-gray-600 leading-relaxed">
+              <p className="font-semibold text-gray-800 mb-1">Як підключити телефон:</p>
+              <p>1. Підключіть телефон до того самого Wi-Fi, що й цей комп&apos;ютер.</p>
+              <p>2. Відкрийте вказане посилання у браузері телефону.</p>
+              <p className="mt-1 text-amber-700">
+                <b>Підказка:</b> якщо посилання на телефоні не відкривається, один раз запустіть файл <b>ALLOW_FIREWALL.bat</b> від імені адміністратора на цьому комп&apos;ютері.
+              </p>
             </div>
           </Card>
         </div>
