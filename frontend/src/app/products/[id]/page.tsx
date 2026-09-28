@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { ArrowLeft, Edit, Send, Trash2, ExternalLink, AlertCircle, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
-import { Product, getProduct, publishProductNow, deleteProduct, getApiBaseUrl } from '@/lib/api';
+import { Product, getProduct, publishProductNow, deleteProduct, getImageUrl } from '@/lib/api';
 import { StatusBadge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -57,8 +57,6 @@ export default function ProductDetailPage() {
   const [deleting, setDeleting] = useState(false);
   const [currentImage, setCurrentImage] = useState(0);
   const [confirmDelete, setConfirmDelete] = useState(false);
-
-  const apiUrl = getApiBaseUrl();
 
   useEffect(() => {
     const fetch = async () => {
@@ -160,7 +158,7 @@ export default function ProductDetailPage() {
         <div className="relative aspect-square w-full overflow-hidden bg-gray-100">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={images[currentImage].startsWith('http') ? images[currentImage] : `${apiUrl}/${images[currentImage]}`}
+            src={getImageUrl(images[currentImage])}
             alt={product.title}
             className="h-full w-full object-cover"
           />
@@ -209,7 +207,7 @@ export default function ProductDetailPage() {
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={src.startsWith('http') ? src : `${apiUrl}/${src}`}
+                src={getImageUrl(src)}
                 alt=""
                 className="h-full w-full object-cover"
               />

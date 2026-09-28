@@ -1,2 +1,6 @@
 /node_modules
 /debug-screenshots
+
+.env
+.env.*
+.env.local

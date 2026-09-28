@@ -5,23 +5,23 @@ export function getApiBaseUrl(): string {
     return process.env.NEXT_PUBLIC_API_URL;
   }
   if (typeof window !== 'undefined') {
-    return `http://${window.location.hostname}:3001`;
+    return '';
   }
-  return 'http://localhost:3001';
+  return 'http://127.0.0.1:3001';
+}
+
+export function getImageUrl(path: string | undefined): string {
+  if (!path) return '';
+  if (path.startsWith('http://') || path.startsWith('https://')) return path;
+  const clean = path.replace(/^\/+/, '');
+  return `/${clean}`;
 }
 
 const api = axios.create({
-  baseURL: getApiBaseUrl(),
+  baseURL: typeof window !== 'undefined' ? '/api' : 'http://127.0.0.1:3001/api',
   headers: {
     'Content-Type': 'application/json',
   },
-});
-
-api.interceptors.request.use((config) => {
-  if (typeof window !== 'undefined' && !process.env.NEXT_PUBLIC_API_URL) {
-    config.baseURL = `http://${window.location.hostname}:3001`;
-  }
-  return config;
 });
 
 // ─── Types ────────────────────────────────────────────────────────────────────

@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { Edit, Trash2, Send, ImageIcon, ExternalLink, RotateCcw } from 'lucide-react';
-import { Product, getApiBaseUrl } from '@/lib/api';
+import { Product, getImageUrl } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
 import { StatusBadge } from './Badge';
 import { Button } from './Button';
@@ -20,7 +20,6 @@ export function ProductCard({ product, onPublish, onDelete, loading }: ProductCa
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const thumbnail = product.images?.[0];
-  const apiUrl = getApiBaseUrl();
 
   return (
     <Card padded={false} className="overflow-hidden">
@@ -31,7 +30,7 @@ export function ProductCard({ product, onPublish, onDelete, loading }: ProductCa
             {thumbnail ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                src={thumbnail.startsWith('http') ? thumbnail : `${apiUrl}/${thumbnail}`}
+                src={getImageUrl(thumbnail)}
                 alt={product.title}
                 className="h-full w-full object-cover"
               />
