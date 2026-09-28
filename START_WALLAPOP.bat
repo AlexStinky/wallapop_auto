@@ -54,7 +54,7 @@ echo - Starting Backend (port 3001)...
 start "Wallapop Backend" cmd /k "cd /d %~dp0backend && title Wallapop Backend && node dist/index.js"
 
 echo - Starting Frontend (port 3000)...
-start "Wallapop Frontend" cmd /k "cd /d %~dp0frontend && title Wallapop Frontend && npm run dev"
+start "Wallapop Frontend" cmd /k "cd /d %~dp0frontend && title Wallapop Frontend && npm run dev -- -H 0.0.0.0"
 
 echo.
 echo Waiting 5 seconds for services to initialize...
@@ -67,6 +67,10 @@ start http://localhost:3000
 echo.
 echo ========================================================
 echo   Wallapop Bot is RUNNING!
+echo.
+echo   Local PC:   http://localhost:3000
+echo   Phone Wi-Fi: http://192.168.31.196:3000
+echo.
 echo   Press any key to STOP all services.
 echo ========================================================
 pause >nul
