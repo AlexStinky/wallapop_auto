@@ -496,8 +496,8 @@ class BrowserService {
                     const text = (el.innerText || el.textContent || '').trim();
                     if (!text || text.length < 2 || text.length > 500)
                         return;
-                    // Never treat informational banners as errors
-                    if (/revisa la informaci|hemos rellenado|detalles por ti/i.test(text)) {
+                    // Never treat informational banners or loading states as errors
+                    if (/revisa la informaci|hemos rellenado|detalles por ti|cargando|subiendo|guardando|loading|espera|por favor|procesando/i.test(text)) {
                         return;
                     }
                     const style = window.getComputedStyle(el);
@@ -587,7 +587,9 @@ class BrowserService {
                     return results;
                 }
                 function isIgnoredMessage(t) {
-                    return /revisa la informaci|hemos rellenado|detalles por ti/i.test(t);
+                    if (!t)
+                        return true;
+                    return /revisa la informaci|hemos rellenado|detalles por ti|cargando|subiendo|guardando|loading|espera|por favor|procesando/i.test(t);
                 }
                 // 1. Check real-time captured popups from MutationObserver (newest first)
                 const captured = (window.__capturedPopups || []);
@@ -644,6 +646,8 @@ class BrowserService {
                         const hasDangerClass = /danger|error|alert/i.test(String(cls));
                         const hasAlertRole = el.getAttribute('role') === 'alert';
                         if (isRedColor(bg) || isRedColor(color) || hasDangerClass || hasAlertRole) {
+                            if (isIgnoredMessage(text))
+                                continue;
                             return text;
                         }
                     }
@@ -661,6 +665,8 @@ class BrowserService {
                         continue;
                     if (isRedColor(style.backgroundColor)) {
                         const text = cleanText(el.innerText || el.textContent || '');
+                        if (isIgnoredMessage(text))
+                            continue;
                         if (text.length > 3 && text.length < 300) {
                             return text;
                         }
@@ -674,6 +680,8 @@ class BrowserService {
                     const text = (el.textContent || '').trim();
                     if (!text || text.length > 80)
                         return false;
+                    if (isIgnoredMessage(text))
+                        return false;
                     if (!/obligatorio|requerido|inv[aá]lido|error|falta|introduce/i.test(text))
                         return false;
                     const style = window.getComputedStyle(el);
@@ -684,6 +692,8 @@ class BrowserService {
                 });
                 for (const errEl of errorElements) {
                     const errText = cleanText(errEl.textContent || '');
+                    if (isIgnoredMessage(errText))
+                        continue;
                     let parent = errEl.parentElement;
                     let label = '';
                     for (let i = 0; i < 4 && parent; i++) {
@@ -703,10 +713,16 @@ class BrowserService {
                     }
                 }
                 if (fieldErrors.length > 0) {
-                    return fieldErrors.join(', ');
+                    const joined = fieldErrors.join(', ');
+                    if (isIgnoredMessage(joined))
+                        return null;
+                    return joined;
                 }
                 return null;
             });
+            if (errorText && /cargando|subiendo|guardando|loading|espera|por favor|procesando/i.test(errorText)) {
+                return null;
+            }
             return errorText;
         }
         catch (_) {
@@ -1559,13 +1575,13 @@ class BrowserService {
             // ── Wait for confirmation or red popup error ─────────────────────────
             console.log('[Browser] Waiting for publication confirmation or error popup...');
             const pollStart = Date.now();
-            const maxWaitMs = 15000;
+            const maxWaitMs = 30000;
             let finalError = null;
             while (Date.now() - pollStart < maxWaitMs) {
                 await page.waitForTimeout(600);
-                // 1. Check if a red popup / toast or validation error appeared
+                // 1. Check if a real red popup / toast or validation error appeared (not "Cargando...")
                 const errorPopup = await this.getRedPopupOrErrorText(page);
-                if (errorPopup) {
+                if (errorPopup && !/cargando|loading|subiendo|guardando|espera|procesando/i.test(errorPopup)) {
                     console.warn('[Browser] Detected error popup: "%s"', errorPopup);
                     finalError = errorPopup;
                     await page.waitForTimeout(800);
@@ -1606,7 +1622,7 @@ class BrowserService {
             }
             // Final check
             const lastCheckError = (await this.getRedPopupOrErrorText(page)) || lastNetworkError;
-            if (lastCheckError) {
+            if (lastCheckError && !/cargando|loading|subiendo|guardando|espera|procesando/i.test(lastCheckError)) {
                 await this.screenshot(`publish-error-${product.id}`);
                 return { success: false, error: lastCheckError };
             }
