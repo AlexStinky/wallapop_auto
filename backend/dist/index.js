@@ -63,8 +63,8 @@ app.use((0, cors_1.default)({
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
 }));
-app.use(express_1.default.json({ limit: '10mb' }));
-app.use(express_1.default.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express_1.default.json({ limit: '50mb' }));
+app.use(express_1.default.urlencoded({ extended: true, limit: '50mb' }));
 // Static file serving for uploaded images
 app.use('/uploads', express_1.default.static(UPLOAD_DIR));
 app.use(express_1.default.static(UPLOAD_DIR));
