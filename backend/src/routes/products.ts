@@ -26,7 +26,10 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 15 * 1024 * 1024 }, // 15 MB
+  limits: {
+    fileSize: 25 * 1024 * 1024, // 25 MB per file
+    fieldSize: 50 * 1024 * 1024,
+  },
   fileFilter: (_req, file, cb) => {
     if (file.mimetype.startsWith('image/')) {
       cb(null, true);
@@ -59,7 +62,7 @@ const createProductSchema = z.object({
 
 const updateProductSchema = createProductSchema.partial();
 
-export const uploadMiddleware = upload.array('images', 10);
+export const uploadMiddleware = upload.array('images', 20);
 
 export const handleUpload = (req: Request, res: Response, next: NextFunction) => {
   try {

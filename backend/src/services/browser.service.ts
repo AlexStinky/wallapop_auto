@@ -1337,19 +1337,37 @@ class BrowserService {
           const fileInput = page.locator('input[type="file"]').first();
           await fileInput.waitFor({ state: 'attached', timeout: 15000 });
           await fileInput.setInputFiles(absolutePaths);
-          console.log('[Browser] Images attached, waiting for preview...');
-          await this.randomDelay(4000, 6000);
+          console.log('[Browser] Images attached (%d files). Waiting for Wallapop to process photos and enable Continuar...', absolutePaths.length);
 
-          // Click Continuar below photos
-          const continueButtons = page.getByRole('button', { name: /Continuar/i });
-          const count = await continueButtons.count();
-          for (let i = count - 1; i >= 0; i--) {
-            const btn = continueButtons.nth(i);
-            if (await btn.isEnabled().catch(() => false)) {
-              console.log('[Browser] Clicking Continuar after photo upload (index %d)...', i);
-              await btn.click();
+          const continueBtn = page.getByRole('button', { name: /Continuar/i }).last();
+          let btnClicked = false;
+
+          // Poll up to 45 seconds for photos to finish uploading and Continuar to be enabled
+          for (let sec = 0; sec < 45; sec++) {
+            await this.randomDelay(1000, 1000);
+            if (await continueBtn.isVisible().catch(() => false) && await continueBtn.isEnabled().catch(() => false)) {
+              console.log('[Browser] Continuar button is now enabled (after %d s). Clicking...', sec + 1);
+              await continueBtn.scrollIntoViewIfNeeded().catch(() => null);
+              await continueBtn.click({ force: true });
+              btnClicked = true;
               await this.randomDelay(2000, 3000);
               break;
+            }
+          }
+
+          if (!btnClicked) {
+            console.log('[Browser] Polling finished. Attempting to click any enabled Continuar button...');
+            const continueButtons = page.getByRole('button', { name: /Continuar/i });
+            const count = await continueButtons.count().catch(() => 0);
+            for (let i = count - 1; i >= 0; i--) {
+              const btn = continueButtons.nth(i);
+              if (await btn.isEnabled().catch(() => false)) {
+                console.log('[Browser] Clicking Continuar after photo upload (index %d)...', i);
+                await btn.click({ force: true });
+                btnClicked = true;
+                await this.randomDelay(2000, 3000);
+                break;
+              }
             }
           }
         }

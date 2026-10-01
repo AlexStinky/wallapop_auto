@@ -61,7 +61,10 @@ const storage = multer_1.default.diskStorage({
 });
 const upload = (0, multer_1.default)({
     storage,
-    limits: { fileSize: 15 * 1024 * 1024 }, // 15 MB
+    limits: {
+        fileSize: 25 * 1024 * 1024, // 25 MB per file
+        fieldSize: 50 * 1024 * 1024,
+    },
     fileFilter: (_req, file, cb) => {
         if (file.mimetype.startsWith('image/')) {
             cb(null, true);
@@ -91,7 +94,7 @@ const createProductSchema = zod_1.z.object({
     images: zod_1.z.array(zod_1.z.string()).default([]),
 });
 const updateProductSchema = createProductSchema.partial();
-exports.uploadMiddleware = upload.array('images', 10);
+exports.uploadMiddleware = upload.array('images', 20);
 const handleUpload = (req, res, next) => {
     try {
         const files = req.files;
