@@ -249,8 +249,9 @@ export default function EditProductPage() {
 
       toast.success('Зміни успішно збережено!');
       router.push(`/products/${id}`);
-    } catch {
-      toast.error('Помилка при збереженні змін');
+    } catch (err: any) {
+      const errMsg = err?.response?.data?.error?.message || err?.response?.data?.message || err?.message || 'Помилка при збереженні змін';
+      toast.error(errMsg);
       if (saveBtn) {
         saveBtn.disabled = false;
         saveBtn.textContent = 'Зберегти зміни';

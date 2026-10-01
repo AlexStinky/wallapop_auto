@@ -195,8 +195,9 @@ export default function NewProductPage() {
         toast.success('Товар додано до черги!');
       }
       router.push('/products');
-    } catch {
-      toast.error('Помилка при збереженні товару');
+    } catch (err: any) {
+      const errMsg = err?.response?.data?.error?.message || err?.response?.data?.message || err?.message || 'Помилка при збереженні товару';
+      toast.error(errMsg);
       if (queueBtn) {
         queueBtn.disabled = false;
         queueBtn.textContent = 'Додати в чергу';

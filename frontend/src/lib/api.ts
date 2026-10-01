@@ -175,17 +175,22 @@ export async function getNetworkInfo(): Promise<NetworkInfo> {
 // ─── Images ───────────────────────────────────────────────────────────────────
 
 export async function uploadImages(files: File[]): Promise<string[]> {
-  const formData = new FormData();
-  files.forEach((file) => {
+  if (!files || files.length === 0) return [];
+
+  // Upload images individually in parallel so no request ever hits proxy/buffer limits
+  const uploadPromises = files.map(async (file) => {
+    const formData = new FormData();
     formData.append('images', file);
+    const { data } = await api.post<{ urls: string[] }>('/upload', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return data.urls;
   });
 
-  const { data } = await api.post<{ urls: string[] }>('/upload', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data',
-    },
-  });
-  return data.urls;
+  const results = await Promise.all(uploadPromises);
+  return results.flat();
 }
 
 export default api;
