@@ -463,6 +463,290 @@ class BrowserService {
             return false;
         }
     }
+    async selectCondition(page, rawCondition) {
+        try {
+            console.log('[Browser] [Estado] Attempting to select condition: %s...', rawCondition);
+            const conditionMap = {
+                new: ['Nuevo', 'Sin abrir', 'Precintado', 'New'],
+                nuevo: ['Nuevo', 'Sin abrir', 'Precintado', 'New'],
+                like_new: ['Como nuevo', 'En perfecto estado', 'Like new'],
+                used_like_new: ['Como nuevo', 'En perfecto estado', 'Like new'],
+                'como nuevo': ['Como nuevo', 'En perfecto estado', 'Like new'],
+                good: ['En buen estado', 'Buen estado', 'Good condition', 'Good'],
+                used_good: ['En buen estado', 'Buen estado', 'Good condition', 'Good'],
+                'en buen estado': ['En buen estado', 'Buen estado', 'Good condition', 'Good'],
+                fair: ['Aceptable', 'Con marcas de uso', 'Fair'],
+                used_fair: ['Aceptable', 'Con marcas de uso', 'Fair'],
+                aceptable: ['Aceptable', 'Con marcas de uso', 'Fair'],
+                poor: ['Lo ha dado todo', 'Para piezas', 'No funciona', 'For parts'],
+                'para piezas': ['Lo ha dado todo', 'Para piezas', 'No funciona', 'For parts'],
+                'lo ha dado todo': ['Lo ha dado todo', 'Para piezas', 'No funciona', 'For parts'],
+            };
+            const conditionIndexMap = {
+                new: 0,
+                nuevo: 0,
+                like_new: 1,
+                used_like_new: 1,
+                como_nuevo: 1,
+                'como nuevo': 1,
+                good: 2,
+                used_good: 2,
+                en_buen_estado: 2,
+                'en buen estado': 2,
+                fair: 3,
+                used_fair: 3,
+                aceptable: 3,
+                poor: 4,
+                para_piezas: 4,
+                'para piezas': 4,
+                lo_ha_dado_todo: 4,
+                'lo ha dado todo': 4,
+            };
+            const normKey = (rawCondition || '').toLowerCase().trim();
+            const conditionLabels = conditionMap[normKey] ?? ['Como nuevo', 'En buen estado', 'Nuevo'];
+            const targetIndex = conditionIndexMap[normKey] ?? 1;
+            // Blur active element to commit any text input and let UI settle
+            await page.evaluate(() => {
+                if (document.activeElement && document.activeElement instanceof HTMLElement) {
+                    document.activeElement.blur();
+                }
+            }).catch(() => null);
+            await this.randomDelay(300, 600);
+            for (let attempt = 1; attempt <= 2; attempt++) {
+                console.log('[Browser] [Estado] Selection attempt %d of 2...', attempt);
+                // ── Phase 1: Check if options or native select are already directly available on page
+                const directSelected = await page.evaluate(({ labels, targetIdx }) => {
+                    function queryAllDeep(selector, root = document) {
+                        let results = Array.from(root.querySelectorAll(selector));
+                        const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+                        while (walker.nextNode()) {
+                            const node = walker.currentNode;
+                            if (node.shadowRoot) {
+                                results = results.concat(queryAllDeep(selector, node.shadowRoot));
+                            }
+                        }
+                        return results;
+                    }
+                    // Native <select> check
+                    const selects = queryAllDeep('select');
+                    for (const sel of selects) {
+                        const lbl = (sel.closest('label, div, fieldset')?.textContent || '') + ' ' + (sel.name || '') + ' ' + (sel.id || '');
+                        if (/\bestado\b/i.test(lbl) || /\bcondition\b/i.test(lbl)) {
+                            for (let i = 0; i < sel.options.length; i++) {
+                                const optText = (sel.options[i].text || '').toLowerCase();
+                                if (labels.some(l => optText.includes(l.toLowerCase()))) {
+                                    sel.selectedIndex = i;
+                                    sel.dispatchEvent(new Event('input', { bubbles: true }));
+                                    sel.dispatchEvent(new Event('change', { bubbles: true }));
+                                    return true;
+                                }
+                            }
+                            if (sel.options.length > targetIdx + 1) {
+                                sel.selectedIndex = targetIdx + 1; // +1 if 0 is placeholder
+                                sel.dispatchEvent(new Event('input', { bubbles: true }));
+                                sel.dispatchEvent(new Event('change', { bubbles: true }));
+                                return true;
+                            }
+                        }
+                    }
+                    // Direct visible radio / chips / cards check
+                    const containers = queryAllDeep('section, div, fieldset, [class*="section" i], [class*="field" i], [class*="group" i]');
+                    const estadoContainer = containers.find(c => {
+                        const text = (c.textContent || '').trim();
+                        if (text.length > 800)
+                            return false;
+                        return /\bestado\b/i.test(text) && !/estados unidos/i.test(text);
+                    });
+                    if (estadoContainer) {
+                        const candidates = Array.from(estadoContainer.querySelectorAll('walla-radio, input[type="radio"], button, [role="radio"], [role="button"], label, div[class*="chip" i], div[class*="pill" i], div[class*="card" i], div[class*="item" i]'));
+                        for (const label of labels) {
+                            const match = candidates.find(el => {
+                                const t = (el.textContent || '').trim().toLowerCase();
+                                return t === label.toLowerCase() || t.includes(label.toLowerCase());
+                            });
+                            if (match && (match.offsetParent !== null || match.offsetHeight > 0)) {
+                                match.scrollIntoView({ block: 'center' });
+                                match.click();
+                                const innerInp = match.querySelector('input') || (match.tagName.toLowerCase() === 'input' ? match : null);
+                                if (innerInp)
+                                    innerInp.click();
+                                return true;
+                            }
+                        }
+                    }
+                    return false;
+                }, { labels: conditionLabels, targetIdx: targetIndex }).catch(() => false);
+                if (directSelected) {
+                    console.log('[Browser] [Estado] Selected condition via direct visible option/select');
+                    await this.randomDelay(400, 800);
+                    return true;
+                }
+                // ── Phase 2: Find & Open Dropdown
+                const dropdownLocator = page
+                    .locator('walla-dropdown, tsl-dropdown, walla-select, div[class*="dropdown" i]')
+                    .filter({ hasText: /\bEstado\b/i })
+                    .locator('div[role="button"], .walla-dropdown__inner-input, button, [class*="inner" i]')
+                    .or(page.locator('walla-dropdown[label*="estado" i], tsl-dropdown[label*="estado" i]').locator('div[role="button"], .walla-dropdown__inner-input, button, [class*="inner" i]'))
+                    .or(page.locator('[id*="condition" i], [name*="condition" i], [formcontrolname*="condition" i], [id*="estado" i]').locator('div[role="button"], .walla-dropdown__inner-input, button, [class*="inner" i]'))
+                    .or(page
+                    .locator('text=/\\bEstado\\b/i')
+                    .locator('xpath=ancestor::*[contains(@class, "dropdown") or contains(@class, "field") or contains(@class, "cell") or contains(@class, "col") or self::walla-dropdown or self::tsl-dropdown][1]//div[@role="button" or contains(@class, "inner")] | ..//div[@role="button"]'))
+                    .first();
+                if (await dropdownLocator.isVisible({ timeout: 2500 }).catch(() => false)) {
+                    console.log('[Browser] [Estado] Clicking dropdown via locator...');
+                    await dropdownLocator.scrollIntoViewIfNeeded().catch(() => null);
+                    await dropdownLocator.click({ force: true }).catch(() => null);
+                }
+                // Check if options appeared or if we need deep DOM trigger
+                const optionsLocator = page.locator('walla-dropdown-item, tsl-dropdown-item, [role="option"], walla-floating-area:not([class*="hidden"]) *').first();
+                const optionsVisible = await optionsLocator.isVisible({ timeout: 1200 }).catch(() => false);
+                if (!optionsVisible) {
+                    console.log('[Browser] [Estado] Dropdown options not visible yet, triggering deep DOM click...');
+                    await page.evaluate(() => {
+                        function queryAllDeep(selector, root = document) {
+                            let results = Array.from(root.querySelectorAll(selector));
+                            const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+                            while (walker.nextNode()) {
+                                const node = walker.currentNode;
+                                if (node.shadowRoot) {
+                                    results = results.concat(queryAllDeep(selector, node.shadowRoot));
+                                }
+                            }
+                            return results;
+                        }
+                        const dropdowns = queryAllDeep('walla-dropdown, tsl-dropdown, walla-select, [class*="dropdown" i]');
+                        for (const d of dropdowns) {
+                            const lbl = (d.getAttribute('label') || '').toLowerCase();
+                            const txt = (d.textContent || '').trim().toLowerCase();
+                            const id = (d.getAttribute('id') || '').toLowerCase();
+                            const name = (d.getAttribute('name') || '').toLowerCase();
+                            if (lbl.includes('estado') ||
+                                id.includes('estado') ||
+                                id.includes('condition') ||
+                                name.includes('estado') ||
+                                name.includes('condition') ||
+                                (/\bestado\b/i.test(txt) && !txt.includes('marca') && !txt.includes('color') && !txt.includes('categoría'))) {
+                                const btn = d.querySelector('div[role="button"], .walla-dropdown__inner-input, button, [class*="inner" i]') || d;
+                                btn.scrollIntoView({ block: 'center' });
+                                btn.click();
+                                btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+                                btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+                                btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                                return true;
+                            }
+                        }
+                        const allElements = queryAllDeep('*');
+                        const labelEl = allElements.find((el) => {
+                            if (el.children.length > 3)
+                                return false;
+                            const t = (el.textContent || '').trim();
+                            return /\bestado\b/i.test(t) && !/estados unidos/i.test(t) && t.length < 50;
+                        });
+                        if (labelEl) {
+                            let p = labelEl.parentElement;
+                            for (let i = 0; i < 5 && p; i++) {
+                                const btn = p.querySelector('div[role="button"], button, .walla-dropdown__inner-input, [class*="inner" i], [class*="select" i]');
+                                if (btn) {
+                                    btn.scrollIntoView({ block: 'center' });
+                                    btn.click();
+                                    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                                    return true;
+                                }
+                                if (p.tagName.toLowerCase().includes('dropdown') || p.getAttribute('role') === 'button') {
+                                    p.scrollIntoView({ block: 'center' });
+                                    p.click();
+                                    return true;
+                                }
+                                p = p.parentElement;
+                            }
+                        }
+                        return false;
+                    }).catch(() => false);
+                    await this.randomDelay(600, 1000);
+                }
+                // ── Phase 3: Select Condition Option
+                let conditionSelected = false;
+                // Try Playwright locators for visible dropdown items
+                for (const label of conditionLabels) {
+                    const itemLocator = page
+                        .locator('walla-dropdown-item, tsl-dropdown-item, [role="option"], walla-floating-area walla-dropdown-item, li[role="option"]')
+                        .filter({ hasText: new RegExp(label, 'i') })
+                        .first();
+                    if (await itemLocator.isVisible({ timeout: 800 }).catch(() => false)) {
+                        console.log('[Browser] [Estado] Selecting condition option by label: %s', label);
+                        await itemLocator.scrollIntoViewIfNeeded().catch(() => null);
+                        await itemLocator.click({ force: true }).catch(() => null);
+                        conditionSelected = true;
+                        await this.randomDelay(400, 800);
+                        break;
+                    }
+                }
+                // If not selected via locator, use deep evaluate with text and index fallback
+                if (!conditionSelected) {
+                    conditionSelected = await page.evaluate(({ labels, targetIdx }) => {
+                        function queryAllDeep(selector, root = document) {
+                            let results = Array.from(root.querySelectorAll(selector));
+                            const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+                            while (walker.nextNode()) {
+                                const node = walker.currentNode;
+                                if (node.shadowRoot) {
+                                    results = results.concat(queryAllDeep(selector, node.shadowRoot));
+                                }
+                            }
+                            return results;
+                        }
+                        const items = queryAllDeep('walla-dropdown-item, tsl-dropdown-item, [role="option"], .walla-dropdown-item, walla-floating-area [role="button"], li[role="option"], li');
+                        const visibleItems = items.filter(it => it.offsetParent !== null || it.offsetHeight > 0);
+                        const pool = visibleItems.length > 0 ? visibleItems : items;
+                        // 1. Text match
+                        for (const label of labels) {
+                            const target = pool.find((it) => {
+                                const t = (it.textContent || '').trim().toLowerCase();
+                                return t.includes(label.toLowerCase());
+                            });
+                            if (target) {
+                                target.scrollIntoView({ block: 'center' });
+                                target.click();
+                                target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                                return true;
+                            }
+                        }
+                        // 2. Index match fallback
+                        if (pool.length > 0) {
+                            const safeIdx = Math.min(Math.max(0, targetIdx), pool.length - 1);
+                            const target = pool[safeIdx];
+                            if (target) {
+                                target.scrollIntoView({ block: 'center' });
+                                target.click();
+                                target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                                return true;
+                            }
+                        }
+                        return false;
+                    }, { labels: conditionLabels, targetIdx: targetIndex }).catch(() => false);
+                    if (conditionSelected) {
+                        console.log('[Browser] [Estado] Selected condition via deep evaluate fallback');
+                        await this.randomDelay(400, 800);
+                    }
+                }
+                // Close dropdown overlay if still open
+                await page.keyboard.press('Escape').catch(() => null);
+                await this.randomDelay(300, 600);
+                if (conditionSelected) {
+                    console.log('[Browser] [Estado] Condition successfully selected on attempt %d', attempt);
+                    return true;
+                }
+                console.warn('[Browser] [Estado] Condition selection attempt %d did not complete, retrying...', attempt);
+                await this.randomDelay(800, 1500);
+            }
+            console.warn('[Browser] [Estado] Could not select condition after all attempts');
+            return false;
+        }
+        catch (err) {
+            console.warn('[Browser] [Estado] Error selecting condition:', err?.message || err);
+            return false;
+        }
+    }
     async setupErrorObserver(page) {
         try {
             await page.evaluate(() => {
@@ -1100,155 +1384,7 @@ class BrowserService {
                 console.warn('[Browser] Description textarea not found on page');
             }
             // ── Step 7: Condition (Estado*) ──────────────────────────────────────
-            const conditionMap = {
-                new: ['Nuevo', 'Sin abrir', 'New'],
-                like_new: ['Como nuevo', 'Like new', 'En buen estado'],
-                used_like_new: ['Como nuevo', 'Like new', 'En buen estado'],
-                good: ['En buen estado', 'Buen estado', 'Good condition', 'Good'],
-                used_good: ['En buen estado', 'Buen estado', 'Good condition', 'Good'],
-                fair: ['Aceptable', 'Fair'],
-                used_fair: ['Aceptable', 'Fair'],
-                poor: ['Lo ha dado todo', 'Para piezas', 'For parts'],
-            };
-            const conditionLabels = conditionMap[product.condition] ?? ['Como nuevo', 'En buen estado', 'Nuevo'];
-            console.log('[Browser] Selecting condition: %s...', product.condition);
-            // Targeted locator: strictly find the dropdown for condition (never Marca, Color, Categoría)
-            const estadoDropdown = page
-                .locator('walla-dropdown')
-                .filter({ hasText: /^Estado/i })
-                .locator('div[role="button"], .walla-dropdown__inner-input, [class*="inner"]')
-                .or(page.locator('walla-dropdown[label*="Estado" i]').locator('div[role="button"], .walla-dropdown__inner-input, [class*="inner"]'))
-                .or(page
-                .locator('text=/^\\s*Estado\\s*\\*?\\s*$/i')
-                .locator('xpath=ancestor::*[contains(@class, "dropdown") or contains(@class, "field") or contains(@class, "cell") or contains(@class, "col") or self::walla-dropdown][1]//div[@role="button" or contains(@class, "inner")] | ..//div[@role="button"]'))
-                .first();
-            let opened = false;
-            if (await estadoDropdown.isVisible({ timeout: 4000 }).catch(() => false)) {
-                console.log('[Browser] Opening Estado dropdown via locator...');
-                await estadoDropdown.scrollIntoViewIfNeeded();
-                await estadoDropdown.click({ force: true });
-                opened = true;
-            }
-            else {
-                console.log('[Browser] Estado locator not visible directly, searching deep in DOM...');
-                opened = await page.evaluate(() => {
-                    function queryAllDeep(selector, root = document) {
-                        let results = Array.from(root.querySelectorAll(selector));
-                        const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
-                        while (walker.nextNode()) {
-                            const node = walker.currentNode;
-                            if (node.shadowRoot) {
-                                results = results.concat(queryAllDeep(selector, node.shadowRoot));
-                            }
-                        }
-                        return results;
-                    }
-                    // 1. Look for walla-dropdown containing Estado
-                    const dropdowns = queryAllDeep('walla-dropdown');
-                    for (const d of dropdowns) {
-                        const lbl = (d.getAttribute('label') || '').toLowerCase();
-                        const txt = (d.textContent || '').trim().toLowerCase();
-                        if (lbl.includes('estado') || (txt.startsWith('estado') && !txt.includes('marca') && !txt.includes('color'))) {
-                            const btn = d.querySelector('div[role="button"], .walla-dropdown__inner-input, button') || d;
-                            btn.scrollIntoView({ block: 'center' });
-                            btn.click();
-                            return true;
-                        }
-                    }
-                    // 2. Look for label text strictly matching Estado
-                    const allEls = queryAllDeep('*');
-                    const labelEl = allEls.find((el) => {
-                        if (el.children.length > 2)
-                            return false;
-                        const t = (el.textContent || '').trim();
-                        return /^Estado\s*\*?$/i.test(t);
-                    });
-                    if (labelEl) {
-                        let p = labelEl.parentElement;
-                        for (let i = 0; i < 4 && p; i++) {
-                            const btn = p.querySelector('div[role="button"], button, .walla-dropdown__inner-input, [class*="inner"]');
-                            if (btn) {
-                                btn.scrollIntoView({ block: 'center' });
-                                btn.click();
-                                return true;
-                            }
-                            if (p.tagName.toLowerCase() === 'walla-dropdown' || p.getAttribute('role') === 'button') {
-                                p.scrollIntoView({ block: 'center' });
-                                p.click();
-                                return true;
-                            }
-                            p = p.parentElement;
-                        }
-                    }
-                    return false;
-                }).catch(() => false);
-            }
-            await this.randomDelay(1000, 1800);
-            // Select condition option
-            let conditionSelected = false;
-            for (const label of conditionLabels) {
-                const opt = page
-                    .locator('walla-floating-area:not([class*="hidden"]) walla-dropdown-item, walla-dropdown-item, [role="option"]')
-                    .filter({ hasText: new RegExp(`^\\s*${label}`, 'i') })
-                    .or(page.getByRole('option', { name: new RegExp(`^\\s*${label}`, 'i') }))
-                    .first();
-                if (await opt.isVisible({ timeout: 1500 }).catch(() => false)) {
-                    console.log('[Browser] Selecting condition option: %s', label);
-                    await opt.scrollIntoViewIfNeeded();
-                    await opt.click({ force: true });
-                    conditionSelected = true;
-                    await this.randomDelay(500, 1000);
-                    break;
-                }
-            }
-            // Evaluate fallback if Playwright click didn't catch the option
-            if (!conditionSelected) {
-                conditionSelected = await page.evaluate((labels) => {
-                    function queryAllDeep(selector, root = document) {
-                        let results = Array.from(root.querySelectorAll(selector));
-                        const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
-                        while (walker.nextNode()) {
-                            const node = walker.currentNode;
-                            if (node.shadowRoot) {
-                                results = results.concat(queryAllDeep(selector, node.shadowRoot));
-                            }
-                        }
-                        return results;
-                    }
-                    const items = queryAllDeep('walla-dropdown-item, [role="option"], li');
-                    for (const label of labels) {
-                        const target = items.find((it) => {
-                            const t = (it.textContent || '').trim().toLowerCase();
-                            return t === label.toLowerCase() || t.startsWith(label.toLowerCase());
-                        });
-                        if (target) {
-                            target.scrollIntoView({ block: 'center' });
-                            target.click();
-                            return true;
-                        }
-                    }
-                    // Fallback: click first visible option in open dropdown
-                    const firstOpt = items.find((it) => {
-                        const r = it.getAttribute('role');
-                        return r === 'option' || it.tagName.toLowerCase() === 'walla-dropdown-item';
-                    });
-                    if (firstOpt) {
-                        firstOpt.click();
-                        return true;
-                    }
-                    return false;
-                }, conditionLabels).catch(() => false);
-                if (conditionSelected) {
-                    console.log('[Browser] Selected condition via evaluate fallback');
-                    await this.randomDelay(500, 1000);
-                }
-                else {
-                    console.warn('[Browser] Condition could not be selected');
-                }
-            }
-            // Close dropdown if still open
-            await page.keyboard.press('Escape').catch(() => null);
-            await this.randomDelay(400, 800);
+            await this.selectCondition(page, product.condition);
             // ── Step 7.2: Price (Precio*) ────────────────────────────────────────
             console.log('[Browser] Filling price: %s', product.price);
             let priceFilled = false;
