@@ -531,8 +531,78 @@ class BrowserService {
       }).catch(() => null);
       await this.randomDelay(300, 600);
 
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        console.log('[Browser] [Estado] Selection attempt %d of 2...', attempt);
+      // Helper function to check if Estado has an actual value selected
+      const isEstadoSelected = async (): Promise<boolean> => {
+        return await page.evaluate(({ labels }: { labels: string[] }) => {
+          function queryAllDeep(selector: string, root: Document | Element | ShadowRoot = document): Element[] {
+            let results = Array.from(root.querySelectorAll(selector));
+            const walker = document.createTreeWalker(root as Node, NodeFilter.SHOW_ELEMENT);
+            while (walker.nextNode()) {
+              const node = walker.currentNode as Element;
+              if (node.shadowRoot) {
+                results = results.concat(queryAllDeep(selector, node.shadowRoot));
+              }
+            }
+            return results;
+          }
+
+          const dropdowns = queryAllDeep('walla-dropdown, tsl-dropdown, walla-select, div[class*="dropdown" i]') as HTMLElement[];
+          for (const d of dropdowns) {
+            const txt = (d.textContent || '').trim();
+            const lbl = (d.getAttribute('label') || '').toLowerCase();
+            const id = (d.getAttribute('id') || '').toLowerCase();
+            const name = (d.getAttribute('name') || '').toLowerCase();
+            if (
+              lbl.includes('estado') ||
+              id.includes('estado') ||
+              id.includes('condition') ||
+              name.includes('estado') ||
+              name.includes('condition') ||
+              (/\bestado\b/i.test(txt) && !txt.includes('marca') && !txt.includes('color') && !txt.includes('categoría'))
+            ) {
+              const valEl = d.querySelector('.walla-dropdown__inner-input, [class*="value" i], [class*="selected" i], [role="button"]');
+              const valText = (valEl?.textContent || txt).trim();
+              if (labels.some(l => valText.toLowerCase().includes(l.toLowerCase()))) {
+                return true;
+              }
+              const allKnown = ['nuevo', 'como nuevo', 'en buen estado', 'buen estado', 'aceptable', 'lo ha dado todo', 'para piezas'];
+              if (allKnown.some(k => valText.toLowerCase().includes(k))) {
+                return true;
+              }
+            }
+          }
+          return false;
+        }, { labels: conditionLabels }).catch(() => false);
+      };
+
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        console.log('[Browser] [Estado] Selection attempt %d of 3...', attempt);
+
+        if (await isEstadoSelected()) {
+          console.log('[Browser] [Estado] Estado is already verified as selected!');
+          return true;
+        }
+
+        // Scroll specifically to Estado area
+        const estadoHeadingOrLabel = page
+          .locator('text=/^\\s*Estado\\s*\\*?\\s*$/i')
+          .or(page.locator('label:has-text("Estado")'))
+          .or(page.locator('walla-dropdown[label*="estado" i], tsl-dropdown[label*="estado" i]'))
+          .first();
+
+        if (await estadoHeadingOrLabel.isVisible({ timeout: 2000 }).catch(() => false)) {
+          await estadoHeadingOrLabel.scrollIntoViewIfNeeded().catch(() => null);
+          await this.randomDelay(300, 600);
+        } else {
+          await page.evaluate(() => {
+            const desc = document.querySelector('textarea#description, textarea[name="description"]');
+            if (desc) {
+              desc.scrollIntoView({ block: 'center' });
+              window.scrollBy(0, 200);
+            }
+          }).catch(() => null);
+          await this.randomDelay(300, 500);
+        }
 
         // ── Phase 1: Check if options or native select are already directly available on page
         const directSelected = await page.evaluate(({ labels, targetIdx }: { labels: string[]; targetIdx: number }) => {
@@ -612,14 +682,19 @@ class BrowserService {
 
         // ── Phase 2: Find & Open Dropdown
         const dropdownLocator = page
-          .locator('walla-dropdown, tsl-dropdown, walla-select, div[class*="dropdown" i]')
-          .filter({ hasText: /\bEstado\b/i })
+          .locator('walla-dropdown[label*="estado" i], tsl-dropdown[label*="estado" i]')
           .locator('div[role="button"], .walla-dropdown__inner-input, button, [class*="inner" i]')
-          .or(page.locator('walla-dropdown[label*="estado" i], tsl-dropdown[label*="estado" i]').locator('div[role="button"], .walla-dropdown__inner-input, button, [class*="inner" i]'))
+          .or(page.locator('walla-dropdown[label*="estado" i], tsl-dropdown[label*="estado" i]'))
+          .or(
+            page
+              .locator('walla-dropdown, tsl-dropdown, walla-select, div[class*="dropdown" i]')
+              .filter({ hasText: /\bEstado\b/i })
+              .locator('div[role="button"], .walla-dropdown__inner-input, button, [class*="inner" i]')
+          )
           .or(page.locator('[id*="condition" i], [name*="condition" i], [formcontrolname*="condition" i], [id*="estado" i]').locator('div[role="button"], .walla-dropdown__inner-input, button, [class*="inner" i]'))
           .or(
             page
-              .locator('text=/\\bEstado\\b/i')
+              .locator('text=/^\\s*Estado\\s*\\*?\\s*$/i')
               .locator('xpath=ancestor::*[contains(@class, "dropdown") or contains(@class, "field") or contains(@class, "cell") or contains(@class, "col") or self::walla-dropdown or self::tsl-dropdown][1]//div[@role="button" or contains(@class, "inner")] | ..//div[@role="button"]')
           )
           .first();
@@ -628,6 +703,7 @@ class BrowserService {
           console.log('[Browser] [Estado] Clicking dropdown via locator...');
           await dropdownLocator.scrollIntoViewIfNeeded().catch(() => null);
           await dropdownLocator.click({ force: true }).catch(() => null);
+          await this.randomDelay(500, 900);
         }
 
         // Check if options appeared or if we need deep DOM trigger
@@ -710,16 +786,16 @@ class BrowserService {
         // Try Playwright locators for visible dropdown items
         for (const label of conditionLabels) {
           const itemLocator = page
-            .locator('walla-dropdown-item, tsl-dropdown-item, [role="option"], walla-floating-area walla-dropdown-item, li[role="option"]')
+            .locator('walla-dropdown-item, tsl-dropdown-item, [role="option"], walla-floating-area walla-dropdown-item, li[role="option"], .walla-dropdown-item')
             .filter({ hasText: new RegExp(label, 'i') })
             .first();
 
-          if (await itemLocator.isVisible({ timeout: 800 }).catch(() => false)) {
+          if (await itemLocator.isVisible({ timeout: 1500 }).catch(() => false)) {
             console.log('[Browser] [Estado] Selecting condition option by label: %s', label);
             await itemLocator.scrollIntoViewIfNeeded().catch(() => null);
             await itemLocator.click({ force: true }).catch(() => null);
             conditionSelected = true;
-            await this.randomDelay(400, 800);
+            await this.randomDelay(500, 900);
             break;
           }
         }
@@ -780,7 +856,7 @@ class BrowserService {
 
           if (conditionSelected) {
             console.log('[Browser] [Estado] Selected condition via deep evaluate fallback');
-            await this.randomDelay(400, 800);
+            await this.randomDelay(500, 900);
           }
         }
 
@@ -788,8 +864,15 @@ class BrowserService {
         await page.keyboard.press('Escape').catch(() => null);
         await this.randomDelay(300, 600);
 
+        // Verify that Estado was actually selected
+        const verified = await isEstadoSelected();
+        if (verified) {
+          console.log('[Browser] [Estado] Verified that Estado is selected on attempt %d!', attempt);
+          return true;
+        }
+
         if (conditionSelected) {
-          console.log('[Browser] [Estado] Condition successfully selected on attempt %d', attempt);
+          console.log('[Browser] [Estado] Condition clicked on attempt %d, assuming success', attempt);
           return true;
         }
 
@@ -1822,6 +1905,50 @@ class BrowserService {
 
       // Ensure "Estándar" (#delivery) remains selected before clicking Publicar
       await this.selectEstandarShipping(page);
+
+      // Pre-publish validation check: Ensure Estado is selected before publishing
+      const estadoNeedsFix = await page.evaluate(() => {
+        function queryAllDeep(selector: string, root: Document | Element | ShadowRoot = document): Element[] {
+          let results = Array.from(root.querySelectorAll(selector));
+          const walker = document.createTreeWalker(root as Node, NodeFilter.SHOW_ELEMENT);
+          while (walker.nextNode()) {
+            const node = walker.currentNode as Element;
+            if (node.shadowRoot) {
+              results = results.concat(queryAllDeep(selector, node.shadowRoot));
+            }
+          }
+          return results;
+        }
+
+        const dropdowns = queryAllDeep('walla-dropdown, tsl-dropdown, walla-select, div[class*="dropdown" i]') as HTMLElement[];
+        for (const d of dropdowns) {
+          const txt = (d.textContent || '').trim();
+          const lbl = (d.getAttribute('label') || '').toLowerCase();
+          const id = (d.getAttribute('id') || '').toLowerCase();
+          const name = (d.getAttribute('name') || '').toLowerCase();
+          if (
+            lbl.includes('estado') ||
+            id.includes('estado') ||
+            id.includes('condition') ||
+            name.includes('estado') ||
+            name.includes('condition') ||
+            (/\bestado\b/i.test(txt) && !txt.includes('marca') && !txt.includes('color') && !txt.includes('categoría'))
+          ) {
+            const valEl = d.querySelector('.walla-dropdown__inner-input, [class*="value" i], [class*="selected" i], [role="button"]');
+            const valText = (valEl?.textContent || txt).trim().toLowerCase();
+            const allKnown = ['nuevo', 'como nuevo', 'en buen estado', 'buen estado', 'aceptable', 'lo ha dado todo', 'para piezas'];
+            if (!allKnown.some(k => valText.includes(k))) {
+              return true; // Missing or empty!
+            }
+          }
+        }
+        return false;
+      }).catch(() => false);
+
+      if (estadoNeedsFix) {
+        console.warn('[Browser] [Pre-publish Check] Estado appears unselected! Re-running selectCondition...');
+        await this.selectCondition(page, product.condition);
+      }
 
       // ── Step 8: Final Publish Button ──────────────────────────────────────
       await this.randomDelay(1000, 2000);
