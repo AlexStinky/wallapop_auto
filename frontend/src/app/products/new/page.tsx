@@ -35,6 +35,8 @@ const schema = z.object({
   price: z.coerce.number().positive('Indica un precio válido'),
   quantity: z.coerce.number().int().positive('La cantidad debe ser mayor que 0'),
   weight: z.string().min(1, 'Selecciona el peso'),
+  publishToWallapop: z.boolean(),
+  publishToVinted: z.boolean(),
   // Specific Vinted fields (optional override)
   vintedCategory: z.string().optional(),
   vintedSize: z.string().optional(),
@@ -120,6 +122,8 @@ export default function NewProductPage() {
       quantity: 1,
       condition: 'used_like_new',
       weight: '2-5kg',
+      publishToWallapop: true,
+      publishToVinted: true,
     },
   });
 
@@ -192,6 +196,8 @@ export default function NewProductPage() {
         weight: values.weight,
         quantity: values.quantity,
         images: imagePaths,
+        publishToWallapop: values.publishToWallapop,
+        publishToVinted: values.publishToVinted,
         vintedCategory: values.vintedCategory?.trim() || undefined,
         vintedSize: values.vintedSize?.trim() || undefined,
         vintedTitle: values.vintedTitle?.trim() || undefined,
@@ -307,6 +313,63 @@ export default function NewProductPage() {
             />
             {errors.images && (
               <p className="mt-1 text-xs text-red-500">{errors.images.message}</p>
+            )}
+          </div>
+
+          {/* ── Platform Target Selector (Wallapop / Vinted) ─────── */}
+          <div className="rounded-2xl border border-gray-200 p-4 bg-white shadow-sm">
+            <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2.5">
+              Сайти для публікації
+            </label>
+            <div className="grid grid-cols-2 gap-2.5">
+              {/* Wallapop Switch */}
+              <label
+                className={cn(
+                  'flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all',
+                  watch('publishToWallapop')
+                    ? 'border-[#00C9A7] bg-[#00C9A7]/5'
+                    : 'border-gray-200 bg-gray-50 opacity-60'
+                )}
+              >
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    {...register('publishToWallapop')}
+                    className="h-4 w-4 rounded border-gray-300 text-[#00C9A7] focus:ring-[#00C9A7]"
+                  />
+                  <div>
+                    <p className="text-xs font-bold text-gray-900">Wallapop</p>
+                    <p className="text-[10px] text-gray-500">es.wallapop.com</p>
+                  </div>
+                </div>
+              </label>
+
+              {/* Vinted Switch */}
+              <label
+                className={cn(
+                  'flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all',
+                  watch('publishToVinted')
+                    ? 'border-[#09B1BA] bg-[#09B1BA]/5'
+                    : 'border-gray-200 bg-gray-50 opacity-60'
+                )}
+              >
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    {...register('publishToVinted')}
+                    className="h-4 w-4 rounded border-gray-300 text-[#09B1BA] focus:ring-[#09B1BA]"
+                  />
+                  <div>
+                    <p className="text-xs font-bold text-gray-900">Vinted</p>
+                    <p className="text-[10px] text-gray-500">vinted.es</p>
+                  </div>
+                </div>
+              </label>
+            </div>
+            {!watch('publishToWallapop') && !watch('publishToVinted') && (
+              <p className="mt-2 text-xs text-red-500 font-medium">
+                Виберіть хоча б один сайт для публікації!
+              </p>
             )}
           </div>
 

@@ -33,6 +33,13 @@ const schema = z.object({
   price: z.coerce.number().positive('Вкажіть коректну ціну'),
   quantity: z.coerce.number().int().positive('Кількість повинна бути більше 0'),
   weight: z.string().min(1, 'Виберіть вагу / розмір'),
+  publishToWallapop: z.boolean(),
+  publishToVinted: z.boolean(),
+  vintedCategory: z.string().optional(),
+  vintedSize: z.string().optional(),
+  vintedTitle: z.string().optional(),
+  vintedDescription: z.string().optional(),
+  vintedPrice: z.coerce.number().positive().optional(),
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -105,6 +112,7 @@ export default function EditProductPage() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [showExtraFields, setShowExtraFields] = useState(false);
+  const [showVintedFields, setShowVintedFields] = useState(false);
   const [images, setImages] = useState<ImageItem[]>([]);
 
   const {
@@ -149,10 +157,20 @@ export default function EditProductPage() {
           color: prod.color || '',
           weight: prod.weight || '2-5kg',
           quantity: prod.quantity || 1,
+          publishToWallapop: prod.publishToWallapop !== false,
+          publishToVinted: prod.publishToVinted !== false,
+          vintedCategory: prod.vintedCategory || '',
+          vintedSize: prod.vintedSize || '',
+          vintedTitle: prod.vintedTitle || '',
+          vintedDescription: prod.vintedDescription || '',
+          vintedPrice: prod.vintedPrice || undefined,
         });
 
         if (prod.brand || prod.model || prod.year || prod.style || prod.material || prod.location) {
           setShowExtraFields(true);
+        }
+        if (prod.vintedCategory || prod.vintedSize || prod.vintedTitle || prod.vintedDescription || prod.vintedPrice) {
+          setShowVintedFields(true);
         }
 
         const existingItems: ImageItem[] = (prod.images || []).map((path) => ({
@@ -245,6 +263,13 @@ export default function EditProductPage() {
         weight: values.weight,
         quantity: values.quantity,
         images: allImages,
+        publishToWallapop: values.publishToWallapop,
+        publishToVinted: values.publishToVinted,
+        vintedCategory: values.vintedCategory?.trim() || undefined,
+        vintedSize: values.vintedSize?.trim() || undefined,
+        vintedTitle: values.vintedTitle?.trim() || undefined,
+        vintedDescription: values.vintedDescription?.trim() || undefined,
+        vintedPrice: values.vintedPrice,
       });
 
       toast.success('Зміни успішно збережено!');
@@ -367,6 +392,63 @@ export default function EditProductPage() {
             />
             {images.length === 0 && (
               <p className="mt-1 text-xs text-red-500">Додайте хоча б одну фотографію</p>
+            )}
+          </div>
+
+          {/* ── Platform Target Selector (Wallapop / Vinted) ─────── */}
+          <div className="rounded-2xl border border-gray-200 p-4 bg-white shadow-sm">
+            <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2.5">
+              Сайти для публікації
+            </label>
+            <div className="grid grid-cols-2 gap-2.5">
+              {/* Wallapop Switch */}
+              <label
+                className={cn(
+                  'flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all',
+                  watch('publishToWallapop')
+                    ? 'border-[#00C9A7] bg-[#00C9A7]/5'
+                    : 'border-gray-200 bg-gray-50 opacity-60'
+                )}
+              >
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    {...register('publishToWallapop')}
+                    className="h-4 w-4 rounded border-gray-300 text-[#00C9A7] focus:ring-[#00C9A7]"
+                  />
+                  <div>
+                    <p className="text-xs font-bold text-gray-900">Wallapop</p>
+                    <p className="text-[10px] text-gray-500">es.wallapop.com</p>
+                  </div>
+                </div>
+              </label>
+
+              {/* Vinted Switch */}
+              <label
+                className={cn(
+                  'flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all',
+                  watch('publishToVinted')
+                    ? 'border-[#09B1BA] bg-[#09B1BA]/5'
+                    : 'border-gray-200 bg-gray-50 opacity-60'
+                )}
+              >
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    {...register('publishToVinted')}
+                    className="h-4 w-4 rounded border-gray-300 text-[#09B1BA] focus:ring-[#09B1BA]"
+                  />
+                  <div>
+                    <p className="text-xs font-bold text-gray-900">Vinted</p>
+                    <p className="text-[10px] text-gray-500">vinted.es</p>
+                  </div>
+                </div>
+              </label>
+            </div>
+            {!watch('publishToWallapop') && !watch('publishToVinted') && (
+              <p className="mt-2 text-xs text-red-500 font-medium">
+                Виберіть хоча б один сайт для публікації!
+              </p>
             )}
           </div>
 
@@ -552,6 +634,90 @@ export default function EditProductPage() {
                 : 'Ver campos adicionales (Modelo, Año, Estilo, etc.)'}
             </button>
           </div>
+
+          {/* ── Vinted Specific Fields Toggle (Vinted & Wallapop Dual Posting) ── */}
+          <div className="pt-2">
+            <button
+              type="button"
+              onClick={() => setShowVintedFields(!showVintedFields)}
+              className="flex items-center gap-1.5 text-xs font-semibold text-[#09B1BA] hover:text-[#07888F] transition-colors"
+            >
+              <ChevronDown
+                size={16}
+                className={cn('transition-transform duration-200', showVintedFields && 'rotate-180')}
+              />
+              {showVintedFields
+                ? 'Сховати індивідуальні поля для Vinted'
+                : 'Налаштувати окремі дані для Vinted (розмір, категорія, ціна, тощо)'}
+            </button>
+            <p className="mt-1 text-[11px] text-gray-500 leading-tight">
+              За замовчуванням товар автоматично публікується на обрані сайти з однаковими даними (на Vinted перші 2 фото пропускаються). Заповнюйте поля нижче, лише якщо для Vinted потрібні відмінні дані.
+            </p>
+          </div>
+
+          {showVintedFields && (
+            <div className="space-y-3.5 rounded-2xl border border-[#09B1BA]/30 bg-[#09B1BA]/5 p-4">
+              <h3 className="text-xs font-bold uppercase tracking-wide text-[#09B1BA]">
+                Параметри для Vinted (Опціонально)
+              </h3>
+
+              {/* Vinted Category */}
+              <div className="rounded-xl border border-gray-200 bg-white p-3 focus-within:border-[#09B1BA]">
+                <label className="block text-xs font-normal text-gray-500">Категорія Vinted (наприклад: Mujer, Hombre, Niños, Hogar)</label>
+                <input
+                  {...register('vintedCategory')}
+                  type="text"
+                  placeholder="Залиште порожнім, щоб використати основну"
+                  className="w-full text-sm font-semibold text-gray-900 placeholder:text-gray-300 focus:outline-none bg-transparent mt-0.5"
+                />
+              </div>
+
+              {/* Vinted Size */}
+              <div className="rounded-xl border border-gray-200 bg-white p-3 focus-within:border-[#09B1BA]">
+                <label className="block text-xs font-normal text-gray-500">Розмір / Talla (XS, S, M, L, XL, 42...)</label>
+                <input
+                  {...register('vintedSize')}
+                  type="text"
+                  placeholder="Вкажіть розмір для одягу або взуття"
+                  className="w-full text-sm font-semibold text-gray-900 placeholder:text-gray-300 focus:outline-none bg-transparent mt-0.5"
+                />
+              </div>
+
+              {/* Vinted Title */}
+              <div className="rounded-xl border border-gray-200 bg-white p-3 focus-within:border-[#09B1BA]">
+                <label className="block text-xs font-normal text-gray-500">Заголовок для Vinted</label>
+                <input
+                  {...register('vintedTitle')}
+                  type="text"
+                  placeholder="Залиште порожнім, щоб використати заголовок вище"
+                  className="w-full text-sm font-semibold text-gray-900 placeholder:text-gray-300 focus:outline-none bg-transparent mt-0.5"
+                />
+              </div>
+
+              {/* Vinted Description */}
+              <div className="rounded-xl border border-gray-200 bg-white p-3 focus-within:border-[#09B1BA]">
+                <label className="block text-xs font-normal text-gray-500">Опис для Vinted</label>
+                <textarea
+                  {...register('vintedDescription')}
+                  rows={3}
+                  placeholder="Залиште порожнім, щоб використати опис вище"
+                  className="w-full text-sm font-normal text-gray-900 placeholder:text-gray-300 focus:outline-none bg-transparent mt-0.5"
+                />
+              </div>
+
+              {/* Vinted Price */}
+              <div className="rounded-xl border border-gray-200 bg-white p-3 focus-within:border-[#09B1BA]">
+                <label className="block text-xs font-normal text-gray-500">Ціна для Vinted (€)</label>
+                <input
+                  {...register('vintedPrice')}
+                  type="number"
+                  step="0.01"
+                  placeholder="Залиште порожнім для основної ціни"
+                  className="w-full text-sm font-semibold text-gray-900 placeholder:text-gray-300 focus:outline-none bg-transparent mt-0.5"
+                />
+              </div>
+            </div>
+          )}
 
           {/* ── Extra fields ───────────────────────────────────── */}
           {showExtraFields && (

@@ -174,99 +174,111 @@ class QueueService {
     console.log('[Queue] Queue cleared');
   }
 
-  // Helper: Publish a product to both Wallapop and Vinted
+  // Helper: Publish a product to Wallapop, Vinted, or both based on flags
   private async publishToBothPlatforms(product: any, headless: boolean): Promise<{ success: boolean; error?: string }> {
     const errors: string[] = [];
     let wallapopSuccess = false;
     let vintedSuccess = false;
 
-    // 1. Publish to Wallapop
-    try {
-      console.log('[DualPublish] Step 1: Wallapop for product %s', product.id);
-      await browserService.initialize(headless);
-      const isWpLoggedIn = await browserService.isLoggedIn();
-      if (!isWpLoggedIn) {
-        const settings = await prisma.settings.findFirst();
-        if (settings?.wallapopEmail && settings?.wallapopPassword) {
-          await browserService.login(settings.wallapopEmail, settings.wallapopPassword);
-        }
-      }
+    const shouldPublishWallapop = product.publishToWallapop !== false;
+    const shouldPublishVinted = product.publishToVinted !== false;
 
-      const wpResult = await browserService.publishProduct(product);
-      if (wpResult.success) {
-        wallapopSuccess = true;
-        await prisma.product.update({
-          where: { id: product.id },
-          data: {
-            wallapopId: wpResult.wallapopId ?? null,
-            wallapopUrl: wpResult.url ?? null,
-            wallapopStatus: 'published',
-          },
-        }).catch(() => null);
-        console.log('[DualPublish] Wallapop success for %s', product.id);
-      } else {
-        errors.push(`Wallapop: ${wpResult.error || 'Unknown error'}`);
+    // 1. Publish to Wallapop (if enabled)
+    if (shouldPublishWallapop) {
+      try {
+        console.log('[DualPublish] Step 1: Wallapop for product %s', product.id);
+        await browserService.initialize(headless);
+        const isWpLoggedIn = await browserService.isLoggedIn();
+        if (!isWpLoggedIn) {
+          const settings = await prisma.settings.findFirst();
+          if (settings?.wallapopEmail && settings?.wallapopPassword) {
+            await browserService.login(settings.wallapopEmail, settings.wallapopPassword);
+          }
+        }
+
+        const wpResult = await browserService.publishProduct(product);
+        if (wpResult.success) {
+          wallapopSuccess = true;
+          await prisma.product.update({
+            where: { id: product.id },
+            data: {
+              wallapopId: wpResult.wallapopId ?? null,
+              wallapopUrl: wpResult.url ?? null,
+              wallapopStatus: 'published',
+            },
+          }).catch(() => null);
+          console.log('[DualPublish] Wallapop success for %s', product.id);
+        } else {
+          errors.push(`Wallapop: ${wpResult.error || 'Unknown error'}`);
+          await prisma.product.update({
+            where: { id: product.id },
+            data: { wallapopStatus: 'error' },
+          }).catch(() => null);
+        }
+      } catch (wpErr: any) {
+        errors.push(`Wallapop: ${wpErr.message || String(wpErr)}`);
         await prisma.product.update({
           where: { id: product.id },
           data: { wallapopStatus: 'error' },
         }).catch(() => null);
+      } finally {
+        await browserService.close().catch(() => null);
       }
-    } catch (wpErr: any) {
-      errors.push(`Wallapop: ${wpErr.message || String(wpErr)}`);
-      await prisma.product.update({
-        where: { id: product.id },
-        data: { wallapopStatus: 'error' },
-      }).catch(() => null);
-    } finally {
-      await browserService.close().catch(() => null);
     }
 
-    // Small delay between platforms
-    await this.sleep(2000);
+    // Small delay between platforms if both are publishing
+    if (shouldPublishWallapop && shouldPublishVinted) {
+      await this.sleep(2000);
+    }
 
-    // 2. Publish to Vinted
-    try {
-      console.log('[DualPublish] Step 2: Vinted for product %s', product.id);
-      await vintedBrowserService.initialize(headless);
-      const isVintedLoggedIn = await vintedBrowserService.isLoggedIn();
-      if (!isVintedLoggedIn) {
-        const settings = await prisma.settings.findFirst();
-        if (settings?.vintedEmail && settings?.vintedPassword) {
-          await vintedBrowserService.login(settings.vintedEmail, settings.vintedPassword);
+    // 2. Publish to Vinted (if enabled)
+    if (shouldPublishVinted) {
+      try {
+        console.log('[DualPublish] Step 2: Vinted for product %s', product.id);
+        await vintedBrowserService.initialize(headless);
+        const isVintedLoggedIn = await vintedBrowserService.isLoggedIn();
+        if (!isVintedLoggedIn) {
+          const settings = await prisma.settings.findFirst();
+          if (settings?.vintedEmail && settings?.vintedPassword) {
+            await vintedBrowserService.login(settings.vintedEmail, settings.vintedPassword);
+          }
         }
-      }
 
-      const vintedResult = await vintedBrowserService.publishProduct(product);
-      if (vintedResult.success) {
-        vintedSuccess = true;
-        await prisma.product.update({
-          where: { id: product.id },
-          data: {
-            vintedId: vintedResult.vintedId ?? null,
-            vintedUrl: vintedResult.url ?? null,
-            vintedStatus: 'published',
-          },
-        }).catch(() => null);
-        console.log('[DualPublish] Vinted success for %s', product.id);
-      } else {
-        errors.push(`Vinted: ${vintedResult.error || 'Unknown error'}`);
+        const vintedResult = await vintedBrowserService.publishProduct(product);
+        if (vintedResult.success) {
+          vintedSuccess = true;
+          await prisma.product.update({
+            where: { id: product.id },
+            data: {
+              vintedId: vintedResult.vintedId ?? null,
+              vintedUrl: vintedResult.url ?? null,
+              vintedStatus: 'published',
+            },
+          }).catch(() => null);
+          console.log('[DualPublish] Vinted success for %s', product.id);
+        } else {
+          errors.push(`Vinted: ${vintedResult.error || 'Unknown error'}`);
+          await prisma.product.update({
+            where: { id: product.id },
+            data: { vintedStatus: 'error' },
+          }).catch(() => null);
+        }
+      } catch (vintedErr: any) {
+        errors.push(`Vinted: ${vintedErr.message || String(vintedErr)}`);
         await prisma.product.update({
           where: { id: product.id },
           data: { vintedStatus: 'error' },
         }).catch(() => null);
+      } finally {
+        await vintedBrowserService.close().catch(() => null);
       }
-    } catch (vintedErr: any) {
-      errors.push(`Vinted: ${vintedErr.message || String(vintedErr)}`);
-      await prisma.product.update({
-        where: { id: product.id },
-        data: { vintedStatus: 'error' },
-      }).catch(() => null);
-    } finally {
-      await vintedBrowserService.close().catch(() => null);
     }
 
-    const overallSuccess = wallapopSuccess && vintedSuccess;
-    const partialSuccess = wallapopSuccess || vintedSuccess;
+    const expectedCount = (shouldPublishWallapop ? 1 : 0) + (shouldPublishVinted ? 1 : 0);
+    const successCount = (wallapopSuccess ? 1 : 0) + (vintedSuccess ? 1 : 0);
+
+    const overallSuccess = expectedCount > 0 && successCount === expectedCount;
+    const partialSuccess = successCount > 0;
 
     const finalStatus = overallSuccess ? 'published' : (partialSuccess ? 'published' : 'error');
     const finalErrorMessage = errors.length > 0 ? errors.join(' | ') : null;
@@ -374,9 +386,11 @@ class QueueService {
       return false;
     }
 
-    // Skip if already published on both platforms
-    if (product.wallapopStatus === 'published' && product.vintedStatus === 'published') {
-      console.log('[Queue] Product %s is already published on both sites, skipping', productId);
+    // Skip if already published on enabled platforms
+    const wallapopDone = product.publishToWallapop === false || product.wallapopStatus === 'published';
+    const vintedDone = product.publishToVinted === false || product.vintedStatus === 'published';
+    if (wallapopDone && vintedDone) {
+      console.log('[Queue] Product %s is already published on chosen platforms, skipping', productId);
       return false;
     }
 
@@ -385,8 +399,8 @@ class QueueService {
       where: { id: productId },
       data: {
         status: 'publishing',
-        wallapopStatus: product.wallapopStatus === 'published' ? 'published' : 'publishing',
-        vintedStatus: product.vintedStatus === 'published' ? 'published' : 'publishing',
+        wallapopStatus: product.publishToWallapop === false ? null : (product.wallapopStatus === 'published' ? 'published' : 'publishing'),
+        vintedStatus: product.publishToVinted === false ? null : (product.vintedStatus === 'published' ? 'published' : 'publishing'),
       },
     }).catch(() => null);
 

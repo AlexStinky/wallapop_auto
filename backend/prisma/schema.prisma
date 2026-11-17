@@ -21,6 +21,8 @@ model Product {
   quantity     Int      @default(1)
   images       String   // JSON array of file paths
   status       String   @default("pending") // pending|in_queue|publishing|published|error
+  publishToWallapop Boolean @default(true)
+  publishToVinted   Boolean @default(true)
   wallapopId   String?
   wallapopUrl  String?
   wallapopStatus String? @default("pending") // pending|publishing|published|error

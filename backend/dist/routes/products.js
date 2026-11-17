@@ -92,6 +92,8 @@ const createProductSchema = zod_1.z.object({
     weight: zod_1.z.string().optional(),
     quantity: zod_1.z.number().int().positive().default(1),
     images: zod_1.z.array(zod_1.z.string()).default([]),
+    publishToWallapop: zod_1.z.boolean().default(true),
+    publishToVinted: zod_1.z.boolean().default(true),
     vintedCategory: zod_1.z.string().optional(),
     vintedSize: zod_1.z.string().optional(),
     vintedTitle: zod_1.z.string().optional(),

@@ -47,6 +47,8 @@ export interface Product {
   quantity: number;
   images: string[]; // array of image paths/urls
   status: ProductStatus;
+  publishToWallapop?: boolean;
+  publishToVinted?: boolean;
   wallapopId?: string;
   wallapopUrl?: string;
   wallapopStatus?: string;
