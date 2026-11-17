@@ -402,7 +402,7 @@ class VintedBrowserService {
                 }).filter((p) => fs.existsSync(p));
                 if (absoluteImagePaths.length > 0) {
                     console.log('[VintedPublish] Uploading %d photos (%s): %j', absoluteImagePaths.length, images.length < 3 ? 'all photos (less than 3)' : 'skipped first 2', absoluteImagePaths);
-                    const fileInput = await this.page.waitForSelector('input[data-testid="add-photos-input"], input[name="photos"], input[type="file"][accept*="image"]', { timeout: 10000 });
+                    const fileInput = await this.page.waitForSelector('input[data-testid="add-photos-input"], input[name="photos"], input[type="file"][accept*="image"]', { state: 'attached', timeout: 15000 });
                     if (fileInput) {
                         await fileInput.setInputFiles(absoluteImagePaths);
                         // Give time for uploads to process

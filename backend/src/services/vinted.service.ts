@@ -419,7 +419,7 @@ export class VintedBrowserService {
           );
           const fileInput = await this.page.waitForSelector(
             'input[data-testid="add-photos-input"], input[name="photos"], input[type="file"][accept*="image"]',
-            { timeout: 10000 }
+            { state: 'attached', timeout: 15000 }
           );
           if (fileInput) {
             await fileInput.setInputFiles(absoluteImagePaths);
