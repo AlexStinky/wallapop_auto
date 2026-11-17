@@ -58,6 +58,11 @@ const createProductSchema = z.object({
   weight: z.string().optional(),
   quantity: z.number().int().positive().default(1),
   images: z.array(z.string()).default([]),
+  vintedCategory: z.string().optional(),
+  vintedSize: z.string().optional(),
+  vintedTitle: z.string().optional(),
+  vintedDescription: z.string().optional(),
+  vintedPrice: z.number().positive().optional(),
 });
 
 const updateProductSchema = createProductSchema.partial();

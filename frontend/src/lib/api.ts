@@ -49,6 +49,15 @@ export interface Product {
   status: ProductStatus;
   wallapopId?: string;
   wallapopUrl?: string;
+  wallapopStatus?: string;
+  vintedId?: string;
+  vintedUrl?: string;
+  vintedStatus?: string;
+  vintedCategory?: string;
+  vintedSize?: string;
+  vintedTitle?: string;
+  vintedDescription?: string;
+  vintedPrice?: number;
   errorMessage?: string;
   createdAt: string;
   updatedAt: string;
@@ -65,6 +74,8 @@ export interface QueueStatus {
 export interface Settings {
   wallapopEmail: string;
   wallapopPassword: string;
+  vintedEmail?: string;
+  vintedPassword?: string;
   publishDelay: number; // seconds between publications
   headless: boolean;
 }
@@ -164,6 +175,21 @@ export async function importCookies(cookies: string): Promise<{ success: boolean
 
 export async function openBrowserForLogin(): Promise<{ success: boolean; message: string }> {
   const { data } = await api.post<{ success: boolean; message: string }>('/settings/open-browser');
+  return data;
+}
+
+export async function testVintedLogin(): Promise<{ success: boolean; message: string }> {
+  const { data } = await api.post<{ success: boolean; message: string }>('/settings/vinted/test-login');
+  return data;
+}
+
+export async function importVintedCookies(cookies: string): Promise<{ success: boolean; message: string; count?: number; sessionActive?: boolean }> {
+  const { data } = await api.post<{ success: boolean; message: string; count?: number; sessionActive?: boolean }>('/settings/vinted/import-cookies', { cookies });
+  return data;
+}
+
+export async function openVintedBrowserForLogin(): Promise<{ success: boolean; message: string }> {
+  const { data } = await api.post<{ success: boolean; message: string }>('/settings/vinted/open-browser');
   return data;
 }
 

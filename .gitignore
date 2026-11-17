@@ -12,9 +12,11 @@ Thumbs.db
 # Sessions & Cookies
 *.session-cookies.json
 .session-cookies.json
+backend/.session-cookies.json
+.vinted-cookies.json
+backend/.vinted-cookies.json
 .chrome-profile/
 backend/.chrome-profile/
-backend/.session-cookies.json
 
 
 

@@ -23,6 +23,15 @@ model Product {
   status       String   @default("pending") // pending|in_queue|publishing|published|error
   wallapopId   String?
   wallapopUrl  String?
+  wallapopStatus String? @default("pending") // pending|publishing|published|error
+  vintedId     String?
+  vintedUrl    String?
+  vintedStatus String?  @default("pending") // pending|publishing|published|error
+  vintedCategory String?
+  vintedSize   String?
+  vintedTitle  String?
+  vintedDescription String?
+  vintedPrice  Float?
   errorMessage String?
   queueOrder   Int?
   createdAt    DateTime @default(now())
@@ -33,6 +42,8 @@ model Settings {
   id               String  @id @default(auto()) @map("_id") @db.ObjectId
   wallapopEmail    String  @default("")
   wallapopPassword String  @default("")
+  vintedEmail      String  @default("")
+  vintedPassword   String  @default("")
   publishDelay     Int     @default(30)
   headless         Boolean @default(true)
 }

@@ -4,6 +4,7 @@ import * as path from 'path';
 import { QueueItem, QueueState } from '../types';
 import prisma from '../db/prisma';
 import { browserService } from './browser.service';
+import { vintedBrowserService } from './vinted.service';
 
 // ─── SSE Broadcaster ─────────────────────────────────────────────────────────
 
@@ -173,9 +174,120 @@ class QueueService {
     console.log('[Queue] Queue cleared');
   }
 
+  // Helper: Publish a product to both Wallapop and Vinted
+  private async publishToBothPlatforms(product: any, headless: boolean): Promise<{ success: boolean; error?: string }> {
+    const errors: string[] = [];
+    let wallapopSuccess = false;
+    let vintedSuccess = false;
+
+    // 1. Publish to Wallapop
+    try {
+      console.log('[DualPublish] Step 1: Wallapop for product %s', product.id);
+      await browserService.initialize(headless);
+      const isWpLoggedIn = await browserService.isLoggedIn();
+      if (!isWpLoggedIn) {
+        const settings = await prisma.settings.findFirst();
+        if (settings?.wallapopEmail && settings?.wallapopPassword) {
+          await browserService.login(settings.wallapopEmail, settings.wallapopPassword);
+        }
+      }
+
+      const wpResult = await browserService.publishProduct(product);
+      if (wpResult.success) {
+        wallapopSuccess = true;
+        await prisma.product.update({
+          where: { id: product.id },
+          data: {
+            wallapopId: wpResult.wallapopId ?? null,
+            wallapopUrl: wpResult.url ?? null,
+            wallapopStatus: 'published',
+          },
+        }).catch(() => null);
+        console.log('[DualPublish] Wallapop success for %s', product.id);
+      } else {
+        errors.push(`Wallapop: ${wpResult.error || 'Unknown error'}`);
+        await prisma.product.update({
+          where: { id: product.id },
+          data: { wallapopStatus: 'error' },
+        }).catch(() => null);
+      }
+    } catch (wpErr: any) {
+      errors.push(`Wallapop: ${wpErr.message || String(wpErr)}`);
+      await prisma.product.update({
+        where: { id: product.id },
+        data: { wallapopStatus: 'error' },
+      }).catch(() => null);
+    } finally {
+      await browserService.close().catch(() => null);
+    }
+
+    // Small delay between platforms
+    await this.sleep(2000);
+
+    // 2. Publish to Vinted
+    try {
+      console.log('[DualPublish] Step 2: Vinted for product %s', product.id);
+      await vintedBrowserService.initialize(headless);
+      const isVintedLoggedIn = await vintedBrowserService.isLoggedIn();
+      if (!isVintedLoggedIn) {
+        const settings = await prisma.settings.findFirst();
+        if (settings?.vintedEmail && settings?.vintedPassword) {
+          await vintedBrowserService.login(settings.vintedEmail, settings.vintedPassword);
+        }
+      }
+
+      const vintedResult = await vintedBrowserService.publishProduct(product);
+      if (vintedResult.success) {
+        vintedSuccess = true;
+        await prisma.product.update({
+          where: { id: product.id },
+          data: {
+            vintedId: vintedResult.vintedId ?? null,
+            vintedUrl: vintedResult.url ?? null,
+            vintedStatus: 'published',
+          },
+        }).catch(() => null);
+        console.log('[DualPublish] Vinted success for %s', product.id);
+      } else {
+        errors.push(`Vinted: ${vintedResult.error || 'Unknown error'}`);
+        await prisma.product.update({
+          where: { id: product.id },
+          data: { vintedStatus: 'error' },
+        }).catch(() => null);
+      }
+    } catch (vintedErr: any) {
+      errors.push(`Vinted: ${vintedErr.message || String(vintedErr)}`);
+      await prisma.product.update({
+        where: { id: product.id },
+        data: { vintedStatus: 'error' },
+      }).catch(() => null);
+    } finally {
+      await vintedBrowserService.close().catch(() => null);
+    }
+
+    const overallSuccess = wallapopSuccess && vintedSuccess;
+    const partialSuccess = wallapopSuccess || vintedSuccess;
+
+    const finalStatus = overallSuccess ? 'published' : (partialSuccess ? 'published' : 'error');
+    const finalErrorMessage = errors.length > 0 ? errors.join(' | ') : null;
+
+    await prisma.product.update({
+      where: { id: product.id },
+      data: {
+        status: finalStatus,
+        errorMessage: finalErrorMessage,
+      },
+    }).catch(() => null);
+
+    return {
+      success: partialSuccess,
+      error: finalErrorMessage ?? undefined,
+    };
+  }
+
   // Публікація ТІЛЬКИ цього одного товару прямо зараз (без черги)
   async publishDirectly(productId: string): Promise<{ success: boolean; error?: string }> {
-    console.log('[DirectPublish] Publishing single product directly: %s', productId);
+    console.log('[DirectPublish] Publishing single product directly to both sites: %s', productId);
 
     const product = await prisma.product.findUnique({ where: { id: productId } });
     if (!product) return { success: false, error: 'Product not found' };
@@ -185,73 +297,20 @@ class QueueService {
 
     await prisma.product.update({
       where: { id: productId },
-      data: { status: 'publishing', errorMessage: null },
+      data: {
+        status: 'publishing',
+        wallapopStatus: 'publishing',
+        vintedStatus: 'publishing',
+        errorMessage: null,
+      },
     }).catch(() => null);
     this.broadcast();
 
     const settings = await prisma.settings.findFirst();
     const headless = settings?.headless ?? true;
-    const cookiesPath = path.join(process.cwd(), '.session-cookies.json');
-    const hasCookies = fs.existsSync(cookiesPath);
-
-    if (!hasCookies && (!settings || !settings.wallapopEmail || !settings.wallapopPassword)) {
-      const err = 'Потрібна авторизація на Wallapop. Виконайте вхід або імпортуйте cookies у Налаштуваннях.';
-      await prisma.product.update({
-        where: { id: productId },
-        data: { status: 'error', errorMessage: err },
-      }).catch(() => null);
-      this.broadcast();
-      return { success: false, error: err };
-    }
 
     try {
-      await browserService.initialize(headless);
-      const alreadyIn = await browserService.isLoggedIn();
-      if (!alreadyIn) {
-        if (settings?.wallapopEmail && settings?.wallapopPassword) {
-          const ok = await browserService.login(settings.wallapopEmail, settings.wallapopPassword);
-          if (!ok) {
-            const err = 'Помилка авторизації на Wallapop. Перевірте облікові дані або імпортуйте cookies.';
-            await prisma.product.update({
-              where: { id: productId },
-              data: { status: 'error', errorMessage: err },
-            }).catch(() => null);
-            this.broadcast();
-            return { success: false, error: err };
-          }
-        } else {
-          const err = 'Потрібна авторизація на Wallapop. Виконайте вхід або імпортуйте cookies у Налаштуваннях.';
-          await prisma.product.update({
-            where: { id: productId },
-            data: { status: 'error', errorMessage: err },
-          }).catch(() => null);
-          this.broadcast();
-          return { success: false, error: err };
-        }
-      }
-
-      const result = await browserService.publishProduct(product);
-      if (result.success) {
-        await prisma.product.update({
-          where: { id: productId },
-          data: {
-            status: 'published',
-            wallapopId: result.wallapopId ?? null,
-            wallapopUrl: result.url ?? null,
-            errorMessage: null,
-          },
-        });
-        console.log('[DirectPublish] Product %s published successfully', productId);
-      } else {
-        await prisma.product.update({
-          where: { id: productId },
-          data: {
-            status: 'error',
-            errorMessage: result.error ?? 'Unknown error',
-          },
-        });
-        console.warn('[DirectPublish] Product %s failed: %s', productId, result.error);
-      }
+      const result = await this.publishToBothPlatforms(product, headless);
       this.broadcast();
       return result;
     } catch (err: any) {
@@ -262,11 +321,6 @@ class QueueService {
       }).catch(() => null);
       this.broadcast();
       return { success: false, error: msg };
-    } finally {
-      // Закриваємо браузер тільки якщо черга зараз не працює у фоні
-      if (!this.state.isRunning) {
-        await browserService.close().catch(() => null);
-      }
     }
   }
 
@@ -274,35 +328,8 @@ class QueueService {
 
   private async processLoop(): Promise<void> {
     try {
-      // Load settings once
       let settings = await prisma.settings.findFirst();
-      const cookiesPath = path.join(process.cwd(), '.session-cookies.json');
-      const hasCookies = fs.existsSync(cookiesPath);
-
-      if (!hasCookies && (!settings || !settings.wallapopEmail || !settings.wallapopPassword)) {
-        console.error('[Queue] No credentials or cookies configured');
-        return;
-      }
-
-      // Initialize browser
-      try {
-        const headless = settings?.headless ?? true;
-        await browserService.initialize(headless);
-
-        const alreadyIn = await browserService.isLoggedIn();
-        if (!alreadyIn) {
-          if (settings?.wallapopEmail && settings?.wallapopPassword) {
-            const ok = await browserService.login(settings.wallapopEmail, settings.wallapopPassword);
-            if (!ok) {
-              console.error('[Queue] Login failed, aborting queue');
-              return;
-            }
-          }
-        }
-      } catch (err) {
-        console.error('[Queue] Browser init/login error:', err);
-        return;
-      }
+      const headless = settings?.headless ?? true;
 
       // Process items one by one
       while (this.state.items.length > 0 && !this.shouldStop) {
@@ -312,7 +339,7 @@ class QueueService {
 
         let published = false;
         try {
-          published = await this.processItem(item.productId);
+          published = await this.processItem(item.productId, headless);
         } catch (err) {
           console.error('[Queue] Error processing item %s:', item.productId, err);
         }
@@ -331,8 +358,6 @@ class QueueService {
         }
       }
     } finally {
-      // Cleanup browser and reset running state
-      await browserService.close().catch(() => null);
       this.state.isRunning = false;
       this.isProcessing = false;
       this.shouldStop = false;
@@ -342,53 +367,38 @@ class QueueService {
     }
   }
 
-  private async processItem(productId: string): Promise<boolean> {
+  private async processItem(productId: string, headless = true): Promise<boolean> {
     const product = await prisma.product.findUnique({ where: { id: productId } });
     if (!product) {
       console.warn('[Queue] Product %s not found in DB, skipping', productId);
       return false;
     }
 
-    // Пропускати ті, які вже опубліковані
-    if (product.status === 'published' && product.wallapopId) {
-      console.log('[Queue] Product %s is already published (wallapopId: %s), skipping', productId, product.wallapopId);
+    // Skip if already published on both platforms
+    if (product.wallapopStatus === 'published' && product.vintedStatus === 'published') {
+      console.log('[Queue] Product %s is already published on both sites, skipping', productId);
       return false;
     }
 
     // Mark as publishing
     await prisma.product.update({
       where: { id: productId },
-      data: { status: 'publishing' },
+      data: {
+        status: 'publishing',
+        wallapopStatus: product.wallapopStatus === 'published' ? 'published' : 'publishing',
+        vintedStatus: product.vintedStatus === 'published' ? 'published' : 'publishing',
+      },
     }).catch(() => null);
 
     this.broadcast();
 
     try {
-      const result = await browserService.publishProduct(product);
-
+      const result = await this.publishToBothPlatforms(product, headless);
       if (result.success) {
-        await prisma.product.update({
-          where: { id: productId },
-          data: {
-            status: 'published',
-            wallapopId: result.wallapopId ?? null,
-            wallapopUrl: result.url ?? null,
-            errorMessage: null,
-          },
-        });
         this.state.completedCount++;
-        console.log('[Queue] Product %s published successfully', productId);
         return true;
       } else {
-        await prisma.product.update({
-          where: { id: productId },
-          data: {
-            status: 'error',
-            errorMessage: result.error ?? 'Unknown error',
-          },
-        });
         this.state.failedCount++;
-        console.warn('[Queue] Product %s failed: %s', productId, result.error);
         return false;
       }
     } catch (err) {

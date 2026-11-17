@@ -92,6 +92,11 @@ const createProductSchema = zod_1.z.object({
     weight: zod_1.z.string().optional(),
     quantity: zod_1.z.number().int().positive().default(1),
     images: zod_1.z.array(zod_1.z.string()).default([]),
+    vintedCategory: zod_1.z.string().optional(),
+    vintedSize: zod_1.z.string().optional(),
+    vintedTitle: zod_1.z.string().optional(),
+    vintedDescription: zod_1.z.string().optional(),
+    vintedPrice: zod_1.z.number().positive().optional(),
 });
 const updateProductSchema = createProductSchema.partial();
 exports.uploadMiddleware = upload.array('images', 20);

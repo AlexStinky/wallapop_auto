@@ -5,15 +5,29 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Eye, EyeOff, AlertTriangle, Save, LogIn, ExternalLink, Key, Smartphone, Copy } from 'lucide-react';
-import { getSettings, updateSettings, testLogin, importCookies, openBrowserForLogin, getNetworkInfo, Settings, NetworkInfo } from '@/lib/api';
+import {
+  getSettings,
+  updateSettings,
+  testLogin,
+  importCookies,
+  openBrowserForLogin,
+  testVintedLogin,
+  importVintedCookies,
+  openVintedBrowserForLogin,
+  getNetworkInfo,
+  Settings,
+  NetworkInfo,
+} from '@/lib/api';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import toast from 'react-hot-toast';
 
 const schema = z.object({
-  wallapopEmail: z.string().email('Введіть коректний email'),
-  wallapopPassword: z.string().min(1, 'Вкажіть пароль'),
+  wallapopEmail: z.string().email('Введіть коректний email').or(z.literal('')),
+  wallapopPassword: z.string().optional(),
+  vintedEmail: z.string().email('Введіть коректний email').or(z.literal('')).optional(),
+  vintedPassword: z.string().optional(),
   publishDelay: z.coerce.number().int().min(5, 'Мінімум 5 секунд').max(3600, 'Максимум 3600 секунд'),
   headless: z.boolean(),
 });
@@ -28,6 +42,11 @@ export default function SettingsPage() {
   const [importingCookies, setImportingCookies] = useState(false);
   const [cookiesText, setCookiesText] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [showVintedPassword, setShowVintedPassword] = useState(false);
+  const [testingVintedLogin, setTestingVintedLogin] = useState(false);
+  const [openingVintedBrowser, setOpeningVintedBrowser] = useState(false);
+  const [importingVintedCookies, setImportingVintedCookies] = useState(false);
+  const [vintedCookiesText, setVintedCookiesText] = useState('');
   const [networkInfo, setNetworkInfo] = useState<NetworkInfo | null>(null);
 
   const {
@@ -128,6 +147,60 @@ export default function SettingsPage() {
     }
   };
 
+  const handleTestVintedLogin = async () => {
+    setTestingVintedLogin(true);
+    try {
+      const res = await testVintedLogin();
+      if (res.success) {
+        toast.success(res.message || 'Сесія Vinted активна!');
+      } else {
+        toast.error(res.message || 'Помилка авторизації на Vinted');
+      }
+    } catch {
+      toast.error('Помилка при перевірці сесії Vinted');
+    } finally {
+      setTestingVintedLogin(false);
+    }
+  };
+
+  const handleOpenVintedBrowser = async () => {
+    setOpeningVintedBrowser(true);
+    toast('Відкриваємо Google Chrome для Vinted... Увійдіть у свій акаунт vinted.es.', {
+      icon: '🌐',
+      duration: 6000,
+    });
+    try {
+      const res = await openVintedBrowserForLogin();
+      if (res.success) {
+        toast.success(res.message);
+      } else {
+        toast.error(res.message);
+      }
+    } catch {
+      toast.error('Помилка при запуску браузера Vinted');
+    } finally {
+      setOpeningVintedBrowser(false);
+    }
+  };
+
+  const handleImportVintedCookies = async () => {
+    if (!vintedCookiesText.trim()) return;
+    setImportingVintedCookies(true);
+    try {
+      const res = await importVintedCookies(vintedCookiesText);
+      if (res.success) {
+        toast.success(res.message);
+        setVintedCookiesText('');
+      } else {
+        toast.error(res.message || 'Не вдалося зберегти кукі Vinted');
+      }
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Помилка при імпорті кукі Vinted');
+    } finally {
+      setImportingVintedCookies(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
@@ -207,7 +280,7 @@ export default function SettingsPage() {
         {/* Cookie Import / Manual Session */}
         <div>
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">
-            Імпорт сесії / Cookies (Обхід блокування)
+            Імпорт сесії / Cookies Wallapop (Обхід блокування)
           </h2>
           <Card className="flex flex-col gap-3">
             <p className="text-xs text-gray-600 leading-relaxed">
@@ -228,8 +301,90 @@ export default function SettingsPage() {
               disabled={!cookiesText.trim()}
             >
               <Key size={16} />
-              Зберегти та перевірити Cookies
+              Зберегти та перевірити Cookies Wallapop
             </Button>
+          </Card>
+        </div>
+
+        {/* Vinted Account & Session */}
+        <div>
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-[#09B1BA]">
+            Обліковий запис Vinted (vinted.es)
+          </h2>
+          <Card className="flex flex-col gap-4 border-[#09B1BA]/30 bg-[#09B1BA]/5">
+            <Input
+              {...register('vintedEmail')}
+              label="Email Vinted"
+              type="email"
+              placeholder="vinted@email.com"
+              error={errors.vintedEmail?.message}
+              autoCapitalize="none"
+            />
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium text-gray-700">Пароль Vinted</label>
+              <div className="relative">
+                <input
+                  {...register('vintedPassword')}
+                  type={showVintedPassword ? 'text' : 'password'}
+                  placeholder="••••••••"
+                  className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 pr-11 text-sm text-gray-900 placeholder-gray-400 transition-colors focus:border-[#09B1BA] focus:outline-none focus:ring-2 focus:ring-[#09B1BA]/20"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowVintedPassword((v) => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  {showVintedPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2 pt-2 border-t border-gray-200/60">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={handleTestVintedLogin}
+                loading={testingVintedLogin}
+              >
+                <LogIn size={16} />
+                Перевірити активність сесії Vinted
+              </Button>
+
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={handleOpenVintedBrowser}
+                loading={openingVintedBrowser}
+                className="border-[#09B1BA] text-[#09B1BA] hover:bg-[#09B1BA]/10"
+              >
+                <ExternalLink size={16} />
+                Відкрити Vinted у Chrome (Увійти вручну / Пройти перевірку)
+              </Button>
+            </div>
+
+            {/* Vinted Cookies */}
+            <div className="flex flex-col gap-2 pt-2 border-t border-gray-200/60">
+              <p className="text-xs text-gray-600 leading-relaxed">
+                Імпорт Cookies для Vinted (з розширення Cookie-Editor на <b>vinted.es</b>):
+              </p>
+              <textarea
+                value={vintedCookiesText}
+                onChange={(e) => setVintedCookiesText(e.target.value)}
+                placeholder='Cookies JSON або заголовок для vinted.es'
+                rows={3}
+                className="w-full rounded-xl border border-gray-200 bg-white p-3 font-mono text-xs text-gray-900 placeholder-gray-400 focus:border-[#09B1BA] focus:outline-none focus:ring-2 focus:ring-[#09B1BA]/20"
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={handleImportVintedCookies}
+                loading={importingVintedCookies}
+                disabled={!vintedCookiesText.trim()}
+              >
+                <Key size={16} />
+                Зберегти та перевірити Cookies Vinted
+              </Button>
+            </div>
           </Card>
         </div>
 

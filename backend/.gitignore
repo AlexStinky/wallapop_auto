@@ -8,4 +8,5 @@
 
 # Session & Cookies
 .session-cookies.json
+.vinted-cookies.json
 .chrome-profile/

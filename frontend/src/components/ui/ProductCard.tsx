@@ -69,20 +69,31 @@ export function ProductCard({ product, onPublish, onDelete, loading }: ProductCa
         </div>
       )}
 
-      {/* Wallapop link */}
-      {product.status === 'published' && product.wallapopId && (
-        <div className="mx-3 mb-2">
+      {/* Platform links */}
+      <div className="mx-3 mb-2 flex flex-wrap gap-3">
+        {product.wallapopId && (
           <a
-            href={`https://es.wallapop.com/item/${product.wallapopId}`}
+            href={product.wallapopUrl || `https://es.wallapop.com/item/${product.wallapopId}`}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1 text-xs text-[#00C9A7] hover:underline"
           >
             <ExternalLink size={11} />
-            Відкрити на Wallapop
+            Wallapop
           </a>
-        </div>
-      )}
+        )}
+        {product.vintedUrl && (
+          <a
+            href={product.vintedUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-xs text-[#09B1BA] hover:underline"
+          >
+            <ExternalLink size={11} />
+            Vinted
+          </a>
+        )}
+      </div>
 
       {/* Actions */}
       <div className="flex gap-1.5 border-t border-gray-50 px-3 py-2">

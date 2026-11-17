@@ -41,12 +41,15 @@ const express_1 = require("express");
 const zod_1 = require("zod");
 const prisma_1 = __importDefault(require("../db/prisma"));
 const browser_service_1 = require("../services/browser.service");
+const vinted_service_1 = require("../services/vinted.service");
 const error_1 = require("../middleware/error");
 const router = (0, express_1.Router)();
 // ─── Validation ───────────────────────────────────────────────────────────────
 const settingsSchema = zod_1.z.object({
     wallapopEmail: zod_1.z.string().email().or(zod_1.z.literal('')).optional(),
     wallapopPassword: zod_1.z.string().optional(),
+    vintedEmail: zod_1.z.string().email().or(zod_1.z.literal('')).optional(),
+    vintedPassword: zod_1.z.string().optional(),
     publishDelay: zod_1.z.number().int().min(0).max(3600).optional(),
     headless: zod_1.z.boolean().optional(),
 });
@@ -59,6 +62,7 @@ router.get('/', async (_req, res, next) => {
             ...settings,
             // Never expose the real password to the frontend
             wallapopPassword: settings.wallapopPassword ? '***' : '',
+            vintedPassword: settings.vintedPassword ? '***' : '',
         });
     }
     catch (err) {
@@ -105,6 +109,11 @@ router.put('/', async (req, res, next) => {
         if (data.wallapopPassword !== undefined && data.wallapopPassword !== '***') {
             updateData.wallapopPassword = data.wallapopPassword;
         }
+        if (data.vintedEmail !== undefined)
+            updateData.vintedEmail = data.vintedEmail;
+        if (data.vintedPassword !== undefined && data.vintedPassword !== '***') {
+            updateData.vintedPassword = data.vintedPassword;
+        }
         if (data.publishDelay !== undefined)
             updateData.publishDelay = data.publishDelay;
         if (data.headless !== undefined)
@@ -117,6 +126,7 @@ router.put('/', async (req, res, next) => {
         res.json({
             ...settings,
             wallapopPassword: settings.wallapopPassword ? '***' : '',
+            vintedPassword: settings.vintedPassword ? '***' : '',
         });
     }
     catch (err) {
@@ -205,6 +215,87 @@ router.post('/open-browser', async (_req, res, next) => {
         next(err);
     }
 });
+// ─── Vinted Auth Routes ───────────────────────────────────────────────────────
+// POST /api/settings/vinted/test-login
+router.post('/vinted/test-login', async (_req, res, next) => {
+    try {
+        const settings = await getOrCreateSettings();
+        // Initialize browser in non-headless mode so user can see what's happening
+        await vinted_service_1.vintedBrowserService.initialize(false);
+        let success = false;
+        let message = '';
+        try {
+            success = await vinted_service_1.vintedBrowserService.isLoggedIn();
+            if (success) {
+                message = 'Сесія Vinted активна (відновлено з cookies)';
+            }
+            else if (settings.vintedEmail && settings.vintedPassword) {
+                success = await vinted_service_1.vintedBrowserService.login(settings.vintedEmail, settings.vintedPassword);
+                message = success ? 'Вхід на Vinted успішний' : 'Помилка входу на Vinted. Перевірте облікові дані або скористайтесь ручним входом.';
+            }
+            else {
+                message = 'Сесія не знайдена. Виконайте ручний вхід або імпортуйте cookies.';
+            }
+        }
+        finally {
+            await vinted_service_1.vintedBrowserService.close();
+        }
+        if (success) {
+            res.json({ success: true, message });
+        }
+        else {
+            res.status(401).json({ success: false, message });
+        }
+    }
+    catch (err) {
+        await vinted_service_1.vintedBrowserService.close().catch(() => null);
+        next(err);
+    }
+});
+// POST /api/settings/vinted/import-cookies
+router.post('/vinted/import-cookies', async (req, res, next) => {
+    try {
+        const { cookies } = req.body;
+        if (!cookies || typeof cookies !== 'string') {
+            throw (0, error_1.createError)('Вкажіть кукі для імпорту', 400);
+        }
+        const result = await vinted_service_1.vintedBrowserService.importCookies(cookies);
+        if (!result.success) {
+            return res.status(400).json(result);
+        }
+        // Verify session
+        await vinted_service_1.vintedBrowserService.initialize(true);
+        let sessionActive = false;
+        try {
+            sessionActive = await vinted_service_1.vintedBrowserService.isLoggedIn();
+        }
+        finally {
+            await vinted_service_1.vintedBrowserService.close();
+        }
+        res.json({
+            success: true,
+            count: result.count,
+            sessionActive,
+            message: sessionActive
+                ? `Успішно імпортовано ${result.count} кукі Vinted! Сесія активна.`
+                : `Імпортовано ${result.count} кукі Vinted, але сесія ще не підтверджена. Перевірте актуальність кукі.`,
+        });
+    }
+    catch (err) {
+        await vinted_service_1.vintedBrowserService.close().catch(() => null);
+        next(err);
+    }
+});
+// POST /api/settings/vinted/open-browser
+router.post('/vinted/open-browser', async (_req, res, next) => {
+    try {
+        const result = await vinted_service_1.vintedBrowserService.openBrowserForManualLogin();
+        res.json(result);
+    }
+    catch (err) {
+        next(err);
+    }
+});
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 async function getOrCreateSettings() {
     const existing = await prisma_1.default.settings.findFirst();
@@ -214,6 +305,8 @@ async function getOrCreateSettings() {
         data: {
             wallapopEmail: '',
             wallapopPassword: '',
+            vintedEmail: '',
+            vintedPassword: '',
             publishDelay: 30,
             headless: true,
         },

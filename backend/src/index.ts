@@ -81,6 +81,8 @@ async function initDb(): Promise<void> {
         data: {
           wallapopEmail: '',
           wallapopPassword: '',
+          vintedEmail: '',
+          vintedPassword: '',
           publishDelay: 30,
           headless: true,
         },

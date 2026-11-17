@@ -100,6 +100,8 @@ async function initDb() {
                 data: {
                     wallapopEmail: '',
                     wallapopPassword: '',
+                    vintedEmail: '',
+                    vintedPassword: '',
                     publishDelay: 30,
                     headless: true,
                 },
