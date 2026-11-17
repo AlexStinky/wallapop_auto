@@ -17,11 +17,10 @@ netsh advfirewall firewall add rule name="Wallapop Port 3001" dir=in action=allo
 :: Ensure MongoDB service is running if installed
 net start MongoDB >nul 2>&1
 
-:: Detect local IP address dynamically
+:: Detect local IP address dynamically using node
 set LOCAL_IP=
-for /f "delims=" %%a in ('powershell -NoProfile -Command "(Get-NetIPAddress -AddressFamily IPv4 -InterfaceAlias 'Wi-Fi*', 'Ethernet*', 'Беспроводная сеть*' -ErrorAction SilentlyContinue | Where-Object IPAddress -notmatch '^(127\.|169\.254\.)' | Select-Object -ExpandProperty IPAddress -First 1)"') do set LOCAL_IP=%%a
-if "%LOCAL_IP%"=="" (
-    for /f "delims=" %%a in ('powershell -NoProfile -Command "(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object IPAddress -notmatch '^(127\.|169\.254\.)' | Select-Object -ExpandProperty IPAddress -First 1)"') do set LOCAL_IP=%%a
+if exist "%~dp0get-ip.js" (
+    for /f "delims=" %%a in ('node "%~dp0get-ip.js"') do set LOCAL_IP=%%a
 )
 if "%LOCAL_IP%"=="" set LOCAL_IP=localhost
 
