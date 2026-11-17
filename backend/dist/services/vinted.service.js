@@ -438,7 +438,9 @@ class VintedBrowserService {
             await this.selectColor(product.color);
             // 9. Material (Material)
             await this.selectMaterial(product.material);
-            // 10. Price: Use vintedPrice if provided, else standard price
+            // 10. Fill any other dynamic dropdowns/fields Vinted might render for this category
+            await this.fillRemainingDynamicFields();
+            // 11. Price: Use vintedPrice if provided, else standard price
             const priceToUse = product.vintedPrice ?? product.price;
             const priceInput = await this.page.waitForSelector('input[data-testid="price-input--input"], #price, input[name="price"]', { timeout: 10000 });
             if (priceInput) {
@@ -446,11 +448,11 @@ class VintedBrowserService {
                 await priceInput.fill(priceToUse.toString().replace('.', ','));
                 await this.randomDelay(400, 700);
             }
-            // 11. Package size / Shipping - всегда размер 5 кг (Grande y pesado / 8-package-size / Grande)
+            // 12. Package size / Shipping - всегда размер 5 кг (Grande y pesado / 8-package-size / Grande)
             await this.handlePackageSize();
             // Wait after photo uploads for Vinted processing & anti-spam cooldown
             await this.page.waitForTimeout(4000);
-            // 12. Submit form ("Subir" / "Añadir")
+            // 13. Submit form ("Subir" / "Añadir")
             const submitBtn = await this.page.$('button[data-testid="upload-form-save-button"], button[type="button"]:has-text("Subir"), button[type="submit"]:has-text("Subir")');
             if (submitBtn) {
                 console.log('[VintedPublish] Clicking submit button...');
@@ -704,6 +706,38 @@ class VintedBrowserService {
         }
         catch (e) {
             console.warn('[VintedPublish] Material selection failed:', e);
+        }
+    }
+    async fillRemainingDynamicFields() {
+        if (!this.page)
+            return;
+        try {
+            // Находим все незаполненные селекторы/выпадающие списки в блоке Detalles del artículo
+            // Они имеют структуру button[aria-haspopup="menu"] или input.select-proxy с пустым значением
+            const unselectedButtons = await this.page.$$('.select-wrapper button[aria-haspopup="menu"][data-placeholder=""]');
+            for (const btn of unselectedButtons) {
+                try {
+                    const isCategory = await btn.getAttribute('data-testid');
+                    if (isCategory === 'catalog-select-dropdown-input')
+                        continue;
+                    await btn.click();
+                    await this.page.waitForTimeout(600);
+                    // Берем первый доступный вариант в открывшемся списке/меню
+                    const option = await this.page.$('div[role="menuitem"], [role="option"], ul[role="listbox"] li, div[data-bloom="true"] button, label.web_ui__Radio__radio');
+                    if (option) {
+                        await option.click();
+                        await this.page.waitForTimeout(400);
+                    }
+                    else {
+                        // Если модалка или список закрывается кликом вовне
+                        await this.page.keyboard.press('Escape').catch(() => null);
+                    }
+                }
+                catch (_) { }
+            }
+        }
+        catch (e) {
+            console.warn('[VintedPublish] fillRemainingDynamicFields notice:', e);
         }
     }
     async handlePackageSize() {
