@@ -692,7 +692,7 @@ export class VintedBrowserService {
         // Если бренда нет в списке или не нашли — берем первый который там будет
         if (!selected) {
           const firstOption = await this.page.$(
-            'div[role="menuitem"], [role="option"], ul[role="listbox"] li, div[data-bloom="true"] button'
+            '[data-radix-popper-content-wrapper] div[role="radio"], [data-radix-popper-content-wrapper] [role="menuitem"], [role="menu"] div[role="radio"], [role="menu"] [role="menuitem"]'
           );
           if (firstOption) {
             await firstOption.click();
@@ -710,20 +710,25 @@ export class VintedBrowserService {
     try {
       // Требование: состояние всегда брать второй пункт
       const condBtn = await this.page.$(
-        'button[data-testid="category-condition-single-list-input"], #condition, [data-testid="category-condition-single-list-input"]'
+        'button[data-testid="category-condition-single-list-input"], #condition'
       );
       if (condBtn) {
+        await condBtn.scrollIntoViewIfNeeded().catch(() => null);
         await condBtn.click();
         await this.page.waitForTimeout(600);
 
-        // Ищем все пункты списка и кликаем строго 2-й пункт (индекс 1)
-        const items = await this.page.$$(
-          'div[role="menuitem"], [role="option"], ul li, div[data-bloom="true"] button, label'
+        // В выпадающем меню состояния опции имеют div[role="radio"] внутри popover:
+        // 1-й пункт: Nuevo con etiquetas
+        // 2-й пункт: Nuevo sin etiquetas (или En muy buen estado)
+        const radioItems = await this.page.$$(
+          '[data-radix-popper-content-wrapper] div[role="radio"], [role="menu"] div[role="radio"], div[role="radio"]'
         );
-        if (items.length >= 2) {
-          await items[1].click();
-        } else if (items.length === 1) {
-          await items[0].click();
+
+        if (radioItems.length >= 2) {
+          console.log('[VintedPublish] Selecting 2nd condition option: %s', await radioItems[1].innerText().catch(() => 'item 2'));
+          await radioItems[1].click();
+        } else if (radioItems.length === 1) {
+          await radioItems[0].click();
         }
         await this.page.waitForTimeout(500);
       }
