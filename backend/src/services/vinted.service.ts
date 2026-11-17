@@ -587,11 +587,10 @@ export class VintedBrowserService {
         await categoryTrigger.click();
         await this.page.waitForTimeout(800);
 
-        // Try exact match or fallback category (Hogar, Electrónica, etc.)
+        // 1. Уровень 1 (Root вкладка: Hogar, Mujer, Hombre, Electrónica...)
         const mainCat = categoryName || 'Hogar';
         let option = await this.page.$(`text="${mainCat}"`);
         if (!option) {
-          // If custom category not matched, fallback to Hogar
           option = await this.page.$('text="Hogar"');
         }
 
@@ -599,17 +598,36 @@ export class VintedBrowserService {
           await option.click();
           await this.page.waitForTimeout(600);
 
-          if (subcategoryName) {
-            const subOption = await this.page.$(`text="${subcategoryName}"`);
-            if (subOption) {
-              await subOption.click();
-              await this.page.waitForTimeout(500);
-            }
+          // 2. Уровень 2 (Колонка слева в меню)
+          // Если есть подкатегория, ищем её, иначе кликаем первый доступный пункт
+          let subOption = subcategoryName ? await this.page.$(`text="${subcategoryName}"`) : null;
+          if (!subOption) {
+            subOption = await this.page.$(
+              'div[role="menu"] a, div[role="menu"] button, .site-content div[role="navigation"] button, div:has-text("Pequeños electrodomésticos"), div:has-text("Todos")'
+            );
+          }
+          if (subOption) {
+            await subOption.click().catch(() => null);
+            await this.page.waitForTimeout(500);
+          }
+
+          // 3. Уровень 3 (Конечный листовой пункт категории, чтобы меню полностью закрылось)
+          const leafOption = await this.page.$(
+            'text="Cafeteras y teteras", text="Todos", div[role="menuitem"], a[role="menuitem"]'
+          );
+          if (leafOption) {
+            await leafOption.click().catch(() => null);
+            await this.page.waitForTimeout(500);
           }
         }
+
+        // Если всплывающее меню категорий всё еще перекрывает экран, закрываем его нажатием Escape
+        await this.page.keyboard.press('Escape').catch(() => null);
+        await this.page.waitForTimeout(400);
       }
     } catch (e) {
       console.warn('[VintedPublish] Category selection skipped or failed:', e);
+      await this.page?.keyboard.press('Escape').catch(() => null);
     }
   }
 
