@@ -504,6 +504,19 @@ class VintedBrowserService {
                         return { success: false, error: `Помилка форми Vinted: ${errText.trim()}` };
                     }
                 }
+                // Если URL всё еще /items/new — товар НЕ опубликовался (форма осталась открытой)
+                if (currentUrl.includes('/items/new')) {
+                    const screenshotPath = path.resolve(`./debug-screenshots/vinted-unsubmitted-${product.id}.png`);
+                    fs.mkdirSync(path.dirname(screenshotPath), { recursive: true });
+                    await this.page?.screenshot({ path: screenshotPath, fullPage: true }).catch(() => null);
+                    // Проверяем валидационные ошибки инпутов
+                    const validationErrors = await this.page.$$eval('[data-bloom="true"] [role="alert"], [class*="error"], [class*="helper-error"]', (elements) => elements.map((e) => e.textContent?.trim()).filter(Boolean)).catch(() => []);
+                    const errorDetail = validationErrors.length > 0 ? validationErrors.join('; ') : 'Оголошення не збереглося (сторінка не змінилась)';
+                    return {
+                        success: false,
+                        error: `Vinted: ${errorDetail}`,
+                    };
+                }
                 return {
                     success: true,
                     url: currentUrl,
