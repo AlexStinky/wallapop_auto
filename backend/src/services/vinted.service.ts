@@ -606,41 +606,53 @@ export class VintedBrowserService {
         await categoryTrigger.click();
         await this.page.waitForTimeout(800);
 
-        // 1. Уровень 1 (Root вкладка: Hogar, Mujer, Hombre, Electrónica...)
-        const mainCat = categoryName || 'Hogar';
-        let option = await this.page.$(`text="${mainCat}"`);
-        if (!option) {
-          option = await this.page.$('text="Hogar"');
+        // Идем в глубь дерева категорий внутри [data-testid="catalog-select-dropdown-content"]
+        // пока не кликнем конечный радио-пункт div[role="radio"]
+        for (let step = 0; step < 4; step++) {
+          // Проверяем, есть ли радио-кнопки (конечный уровень категории)
+          const radioOptions = await this.page.$$('[data-testid="catalog-select-dropdown-content"] div[role="radio"]');
+          if (radioOptions.length > 0) {
+            // Если есть конкретный matching по подкатегории/категории
+            let chosen = radioOptions[0];
+            const search = (subcategoryName || categoryName || '').toLowerCase().trim();
+            if (search) {
+              for (const r of radioOptions) {
+                const text = (await r.innerText()).toLowerCase();
+                if (text.includes(search)) {
+                  chosen = r;
+                  break;
+                }
+              }
+            }
+            console.log('[VintedPublish] Selecting final leaf category radio: %s', await chosen.innerText());
+            await chosen.click();
+            await this.page.waitForTimeout(1000);
+            return;
+          }
+
+          // Если мы еще на промежуточном уровне (ветки с шевронами div[role="button"])
+          const buttons = await this.page.$$('[data-testid="catalog-select-dropdown-content"] div[role="button"]');
+          if (buttons.length === 0) break;
+
+          let targetBtn = buttons[0];
+          const query = (step === 0 ? (categoryName || 'Hogar') : (subcategoryName || '')).toLowerCase().trim();
+
+          if (query) {
+            for (const b of buttons) {
+              const text = (await b.innerText()).toLowerCase();
+              if (text.includes(query)) {
+                targetBtn = b;
+                break;
+              }
+            }
+          }
+
+          console.log('[VintedPublish] Category step %d: clicking %s', step, await targetBtn.innerText());
+          await targetBtn.click();
+          await this.page.waitForTimeout(800);
         }
 
-        if (option) {
-          await option.click();
-          await this.page.waitForTimeout(600);
-
-          // 2. Уровень 2 (Колонка слева в меню)
-          // Если есть подкатегория, ищем её, иначе кликаем первый доступный пункт
-          let subOption = subcategoryName ? await this.page.$(`text="${subcategoryName}"`) : null;
-          if (!subOption) {
-            subOption = await this.page.$(
-              'div[role="menu"] a, div[role="menu"] button, .site-content div[role="navigation"] button, div:has-text("Pequeños electrodomésticos"), div:has-text("Todos")'
-            );
-          }
-          if (subOption) {
-            await subOption.click().catch(() => null);
-            await this.page.waitForTimeout(500);
-          }
-
-          // 3. Уровень 3 (Конечный листовой пункт категории, чтобы меню полностью закрылось)
-          const leafOption = await this.page.$(
-            'text="Cafeteras y teteras", text="Todos", div[role="menuitem"], a[role="menuitem"]'
-          );
-          if (leafOption) {
-            await leafOption.click().catch(() => null);
-            await this.page.waitForTimeout(500);
-          }
-        }
-
-        // Если всплывающее меню категорий всё еще перекрывает экран, закрываем его нажатием Escape
+        // Если выпадающее меню вдруг осталось открытым, закрываем Escape
         await this.page.keyboard.press('Escape').catch(() => null);
         await this.page.waitForTimeout(400);
       }
