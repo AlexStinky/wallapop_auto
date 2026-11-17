@@ -355,7 +355,7 @@ export class VintedBrowserService {
         return { success: false, error: 'Сесія Vinted не авторизована. Виконайте вхід у Налаштуваннях.' };
       }
 
-      // 1. Photos upload: REQUIREMENT: Пропускати перші дві фотки для Vinted!
+      // 1. Photos upload: если фоток 3 или больше — пропускаем первые две, если меньше 3 — публикуем все
       let images: string[] = [];
       try {
         images = JSON.parse(product.images || '[]');
@@ -363,12 +363,8 @@ export class VintedBrowserService {
         images = [];
       }
 
-      // Filter: Skip first 2 images
-      let vintedImages = images.slice(2);
-      if (vintedImages.length === 0) {
-        // Fallback: If product only had 1 or 2 images, use them to avoid empty photo error
-        vintedImages = images;
-      }
+      // Если фоток меньше 3 — публикуем все, если 3 и больше — пропускаем первые две
+      const vintedImages = images.length < 3 ? images : images.slice(2);
 
       if (vintedImages.length > 0) {
         const absoluteImagePaths = vintedImages.map((imgPath) => {
@@ -377,7 +373,12 @@ export class VintedBrowserService {
         }).filter((p) => fs.existsSync(p));
 
         if (absoluteImagePaths.length > 0) {
-          console.log('[VintedPublish] Uploading %d photos (skipped first 2): %j', absoluteImagePaths.length, absoluteImagePaths);
+          console.log(
+            '[VintedPublish] Uploading %d photos (%s): %j',
+            absoluteImagePaths.length,
+            images.length < 3 ? 'all photos (less than 3)' : 'skipped first 2',
+            absoluteImagePaths
+          );
           const fileInput = await this.page.waitForSelector(
             'input[data-testid="add-photos-input"], input[name="photos"], input[type="file"][accept*="image"]',
             { timeout: 10000 }
