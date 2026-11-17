@@ -51,6 +51,7 @@ echo.
 echo [4/6] Updating Backend dependencies (npm install) and building...
 cd /d %~dp0backend
 call npm install
+call npx prisma generate
 call npm run build
 
 echo.
