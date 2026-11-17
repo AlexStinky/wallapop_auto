@@ -46,6 +46,8 @@ export class VintedBrowserService {
       });
     }
 
+    this.sanitizeCookiesFile();
+
     this.context = await this.browser.newContext({
       userAgent: DESKTOP_UA,
       viewport: headless ? { width: 1280, height: 800 } : null,
@@ -54,22 +56,50 @@ export class VintedBrowserService {
       storageState: fs.existsSync(COOKIES_PATH) ? COOKIES_PATH : undefined,
     });
 
-    // Ensure session cookies from vinted.com also apply to vinted.es and vice versa
+    // Ensure user authentication cookies from vinted.com and vinted.es are properly aligned
     if (fs.existsSync(COOKIES_PATH)) {
       try {
         const rawData = JSON.parse(fs.readFileSync(COOKIES_PATH, 'utf-8'));
         const cookiesList: any[] = rawData.cookies || [];
-        const extraCookies: any[] = [];
-        for (const c of cookiesList) {
-          if (c.domain && c.domain.includes('vinted.com')) {
-            extraCookies.push({ ...c, domain: c.domain.replace('vinted.com', 'vinted.es') });
-          } else if (c.domain && c.domain.includes('vinted.es')) {
-            extraCookies.push({ ...c, domain: c.domain.replace('vinted.es', 'vinted.com') });
+
+        // Find authentic user token (scope: "user")
+        const userToken = cookiesList.find((c) =>
+          c.name === 'access_token_web' && c.value?.startsWith('ey') &&
+          (() => {
+            try {
+              const p = JSON.parse(Buffer.from(c.value.split('.')[1], 'base64').toString());
+              return p.scope === 'user';
+            } catch {
+              return false;
+            }
+          })()
+        );
+
+        const vUidCookie = cookiesList.find((c) => c.name === 'v_uid');
+        const vSidCookie = cookiesList.find((c) => c.name === 'v_sid');
+
+        // Remove any public/guest tokens that override authenticated sessions
+        const cleanedCookies = cookiesList.filter((c) => {
+          if (c.name === 'access_token_web' && userToken) {
+            try {
+              const p = JSON.parse(Buffer.from(c.value.split('.')[1], 'base64').toString());
+              if (p.scope === 'public') return false;
+            } catch {}
+          }
+          return true;
+        });
+
+        // Ensure user token and v_uid/v_sid exist on .vinted.es, www.vinted.es, .vinted.com, www.vinted.com
+        const domains = ['.vinted.es', 'www.vinted.es', '.vinted.com', 'www.vinted.com'];
+        if (userToken) {
+          for (const d of domains) {
+            cleanedCookies.push({ ...userToken, domain: d });
+            if (vUidCookie) cleanedCookies.push({ ...vUidCookie, domain: d });
+            if (vSidCookie) cleanedCookies.push({ ...vSidCookie, domain: d });
           }
         }
-        if (extraCookies.length > 0) {
-          await this.context.addCookies(extraCookies).catch(() => null);
-        }
+
+        await this.context.addCookies(cleanedCookies).catch(() => null);
       } catch (_) {}
     }
 
@@ -152,6 +182,7 @@ export class VintedBrowserService {
       };
 
       fs.writeFileSync(COOKIES_PATH, JSON.stringify(storageState, null, 2), 'utf-8');
+      this.sanitizeCookiesFile();
       console.log('[VintedBrowser] Imported %d cookies into %s', cookies.length, COOKIES_PATH);
       return { success: true, count: cookies.length };
     } catch (err: any) {
@@ -191,7 +222,9 @@ export class VintedBrowserService {
         });
       }
 
-      this.context = await this.browser.newContext({
+      this.sanitizeCookiesFile();
+
+    this.context = await this.browser.newContext({
         userAgent: DESKTOP_UA,
         locale: 'es-ES',
         timezoneId: 'Europe/Madrid',
@@ -240,6 +273,7 @@ export class VintedBrowserService {
 
       if (this.context) {
         await this.context.storageState({ path: COOKIES_PATH });
+        this.sanitizeCookiesFile();
         console.log('[VintedBrowser] Saved session cookies to %s', COOKIES_PATH);
       }
 
@@ -380,6 +414,14 @@ export class VintedBrowserService {
       await this.acceptCookies(this.page);
       await this.page.waitForTimeout(2000);
 
+      // Disable hover and click events on sticky header so it never opens menus or intercepts clicks
+      await this.page.evaluate(() => {
+        const header = document.querySelector('header, .site-header, [data-testid="header"]');
+        if (header) {
+          (header as HTMLElement).style.pointerEvents = 'none';
+        }
+      }).catch(() => null);
+
       // If redirected to login/register on .es, try on .com
       if (this.page.url().includes('/login') || this.page.url().includes('/auth') || this.page.url().includes('/register')) {
         console.log('[VintedPublish] Redirected on .es (%s), attempting on .com...', this.page.url());
@@ -499,7 +541,7 @@ export class VintedBrowserService {
 
       if (submitBtn) {
         console.log('[VintedPublish] Clicking submit button...');
-        await submitBtn.scrollIntoViewIfNeeded().catch(() => null);
+        await submitBtn.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => null);
         await this.page.waitForTimeout(500);
         await submitBtn.click();
 
@@ -510,7 +552,7 @@ export class VintedBrowserService {
         const currentUrl = this.page.url();
         console.log('[VintedPublish] Post-submit URL: %s', currentUrl);
 
-        if (currentUrl.includes('/items/') && !currentUrl.includes('/items/new')) {
+        if (currentUrl.includes('/member/') || (currentUrl.includes('/items/') && !currentUrl.includes('/items/new'))) {
           const match = currentUrl.match(/\/items\/(\d+)/);
           const vintedId = match ? match[1] : undefined;
           return {
@@ -536,7 +578,7 @@ export class VintedBrowserService {
         }
 
         const retryUrl = this.page.url();
-        if (retryUrl.includes('/items/') && !retryUrl.includes('/items/new')) {
+        if (retryUrl.includes('/member/') || (retryUrl.includes('/items/') && !retryUrl.includes('/items/new'))) {
           const match = retryUrl.match(/\/items\/(\d+)/);
           return {
             success: true,
@@ -603,6 +645,7 @@ export class VintedBrowserService {
         'button[data-testid="catalog-select-dropdown-input"], #category, input[name="category"]'
       );
       if (categoryTrigger) {
+        await categoryTrigger.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => null);
         await categoryTrigger.click();
         await this.page.waitForTimeout(800);
 
@@ -669,18 +712,21 @@ export class VintedBrowserService {
         'button[data-testid="brand-select-dropdown-input"], #brand, [data-testid="brand-select-dropdown-input"]'
       );
       if (brandBtn) {
+        await brandBtn.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => null);
         await brandBtn.click();
         await this.page.waitForTimeout(600);
 
         let selected = false;
         const brandQuery = (brand || '').trim();
         if (brandQuery) {
-          const searchInput = await this.page.$('input[placeholder*="buscar" i], input[type="search"], input[type="text"]');
+          const searchInput = await this.page.$(
+            '[data-radix-popper-content-wrapper] input[type="search"], [data-radix-popper-content-wrapper] input[type="text"], input[placeholder*="buscar" i]'
+          );
           if (searchInput) {
             await searchInput.fill(brandQuery);
             await this.page.waitForTimeout(600);
             const matchItem = await this.page.$(
-              `div[role="menuitem"]:has-text("${brandQuery}"), button:has-text("${brandQuery}"), li:has-text("${brandQuery}")`
+              `[data-radix-popper-content-wrapper] div[role="menuitem"]:has-text("${brandQuery}"), [data-radix-popper-content-wrapper] button:has-text("${brandQuery}"), [data-radix-popper-content-wrapper] div[role="radio"]:has-text("${brandQuery}")`
             );
             if (matchItem) {
               await matchItem.click();
@@ -692,7 +738,7 @@ export class VintedBrowserService {
         // Если бренда нет в списке или не нашли — берем первый который там будет
         if (!selected) {
           const firstOption = await this.page.$(
-            '[data-radix-popper-content-wrapper] div[role="radio"], [data-radix-popper-content-wrapper] [role="menuitem"], [role="menu"] div[role="radio"], [role="menu"] [role="menuitem"]'
+            '[data-radix-popper-content-wrapper] div[role="menuitem"], [data-radix-popper-content-wrapper] button, [data-radix-popper-content-wrapper] div[role="radio"]'
           );
           if (firstOption) {
             await firstOption.click();
@@ -713,7 +759,7 @@ export class VintedBrowserService {
         'button[data-testid="category-condition-single-list-input"], #condition'
       );
       if (condBtn) {
-        await condBtn.scrollIntoViewIfNeeded().catch(() => null);
+        await condBtn.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => null);
         await condBtn.click();
         await this.page.waitForTimeout(600);
 
@@ -721,7 +767,7 @@ export class VintedBrowserService {
         // 1-й пункт: Nuevo con etiquetas
         // 2-й пункт: Nuevo sin etiquetas (или En muy buen estado)
         const radioItems = await this.page.$$(
-          '[data-radix-popper-content-wrapper] div[role="radio"], [role="menu"] div[role="radio"], div[role="radio"]'
+          '[data-radix-popper-content-wrapper] div[role="radio"]'
         );
 
         if (radioItems.length >= 2) {
@@ -744,12 +790,13 @@ export class VintedBrowserService {
         'button[data-testid="category-size-single-grid-input"], #size, [data-testid="category-size-single-grid-input"]'
       );
       if (sizeBtn) {
+        await sizeBtn.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => null);
         await sizeBtn.click();
         await this.page.waitForTimeout(600);
 
         let selected = false;
         if (size && size.trim()) {
-          const sizeOption = await this.page.$(`text="${size.trim()}"`);
+          const sizeOption = await this.page.$(`[data-radix-popper-content-wrapper] :has-text("${size.trim()}")`);
           if (sizeOption) {
             await sizeOption.click();
             selected = true;
@@ -759,7 +806,7 @@ export class VintedBrowserService {
         // Если нет в списке — берем первый доступный пункт
         if (!selected) {
           const firstOption = await this.page.$(
-            'div[role="menuitem"], [role="option"], ul li, div[data-bloom="true"] button'
+            '[data-radix-popper-content-wrapper] div[role="menuitem"], [data-radix-popper-content-wrapper] [role="option"], [data-radix-popper-content-wrapper] button'
           );
           if (firstOption) {
             await firstOption.click();
@@ -779,12 +826,15 @@ export class VintedBrowserService {
         'button[data-testid="color-select-dropdown-input"], #color, [data-testid="color-select-dropdown-input"]'
       );
       if (colorBtn) {
+        await colorBtn.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => null);
         await colorBtn.click();
         await this.page.waitForTimeout(600);
 
         let selected = false;
         if (color && color.trim()) {
-          const colorOption = await this.page.$(`text="${color.trim()}"`);
+          const colorOption = await this.page.$(
+            `[data-radix-popper-content-wrapper] [role="checkbox"]:has-text("${color.trim()}"), [data-radix-popper-content-wrapper] button:has-text("${color.trim()}")`
+          );
           if (colorOption) {
             await colorOption.click();
             selected = true;
@@ -794,13 +844,14 @@ export class VintedBrowserService {
         // Если нет — берем первый
         if (!selected) {
           const firstOption = await this.page.$(
-            'div[role="menuitem"], [role="option"], ul li, div[data-bloom="true"] button'
+            '[data-radix-popper-content-wrapper] [role="checkbox"], [data-radix-popper-content-wrapper] div[role="radio"], [data-radix-popper-content-wrapper] button'
           );
           if (firstOption) {
             await firstOption.click();
           }
         }
         await this.page.waitForTimeout(500);
+        await this.page.keyboard.press('Escape').catch(() => null);
       }
     } catch (e) {
       console.warn('[VintedPublish] Color selection failed:', e);
@@ -814,12 +865,13 @@ export class VintedBrowserService {
         'button[data-testid="category-material-multi-list-input"], #material, [data-testid="category-material-multi-list-input"]'
       );
       if (matBtn) {
+        await matBtn.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => null);
         await matBtn.click();
         await this.page.waitForTimeout(600);
 
         let selected = false;
         if (material && material.trim()) {
-          const matOption = await this.page.$(`text="${material.trim()}"`);
+          const matOption = await this.page.$(`[data-radix-popper-content-wrapper] :has-text("${material.trim()}")`);
           if (matOption) {
             await matOption.click();
             selected = true;
@@ -828,13 +880,14 @@ export class VintedBrowserService {
 
         if (!selected) {
           const firstOption = await this.page.$(
-            'div[role="menuitem"], [role="option"], ul li, div[data-bloom="true"] button'
+            '[data-radix-popper-content-wrapper] [role="checkbox"], [data-radix-popper-content-wrapper] div[role="menuitem"], [data-radix-popper-content-wrapper] button'
           );
           if (firstOption) {
             await firstOption.click();
           }
         }
         await this.page.waitForTimeout(500);
+        await this.page.keyboard.press('Escape').catch(() => null);
       }
     } catch (e) {
       console.warn('[VintedPublish] Material selection failed:', e);
@@ -845,7 +898,6 @@ export class VintedBrowserService {
     if (!this.page) return;
     try {
       // Находим все незаполненные селекторы/выпадающие списки в блоке Detalles del artículo
-      // Они имеют структуру button[aria-haspopup="menu"] или input.select-proxy с пустым значением
       const unselectedButtons = await this.page.$$(
         '.select-wrapper button[aria-haspopup="menu"][data-placeholder=""]'
       );
@@ -855,18 +907,18 @@ export class VintedBrowserService {
           const isCategory = await btn.getAttribute('data-testid');
           if (isCategory === 'catalog-select-dropdown-input') continue;
 
+          await btn.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => null);
           await btn.click();
           await this.page.waitForTimeout(600);
 
-          // Берем первый доступный вариант в открывшемся списке/меню
+          // Берем первый доступный вариант в открывшемся поповере
           const option = await this.page.$(
-            'div[role="menuitem"], [role="option"], ul[role="listbox"] li, div[data-bloom="true"] button, label.web_ui__Radio__radio'
+            '[data-radix-popper-content-wrapper] div[role="menuitem"], [data-radix-popper-content-wrapper] [role="option"], [data-radix-popper-content-wrapper] [role="checkbox"], [data-radix-popper-content-wrapper] button, [data-radix-popper-content-wrapper] div[role="radio"]'
           );
           if (option) {
             await option.click();
             await this.page.waitForTimeout(400);
           } else {
-            // Если модалка или список закрывается кликом вовне
             await this.page.keyboard.press('Escape').catch(() => null);
           }
         } catch (_) {}
@@ -884,6 +936,7 @@ export class VintedBrowserService {
         '[data-testid="8-package-size--cell"], [data-testid="8-package-size--cell--suffix"], #package-size-8, label[for="package_type_selector_8"], [data-testid="package_type_selector_8"]'
       );
       if (heavyCell) {
+        await heavyCell.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => null);
         await heavyCell.click();
         return;
       }
@@ -893,6 +946,7 @@ export class VintedBrowserService {
         '[data-testid="3-package-size--cell"], #package-size-3, label[for="package_type_selector_3"]'
       );
       if (grandCell) {
+        await grandCell.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => null);
         await grandCell.click();
         return;
       }
@@ -902,6 +956,55 @@ export class VintedBrowserService {
       if (anyRadio) {
         await anyRadio.click();
       }
+    } catch (_) {}
+  }
+
+  private sanitizeCookiesFile(): void {
+    if (!fs.existsSync(COOKIES_PATH)) return;
+    try {
+      const rawData = JSON.parse(fs.readFileSync(COOKIES_PATH, 'utf-8'));
+      const cookiesList: any[] = rawData.cookies || [];
+
+      // Find authentic user token (scope: "user")
+      const userToken = cookiesList.find(
+        (c) =>
+          c.name === 'access_token_web' &&
+          c.value?.startsWith('ey') &&
+          (() => {
+            try {
+              const p = JSON.parse(Buffer.from(c.value.split('.')[1], 'base64').toString());
+              return p.scope === 'user';
+            } catch {
+              return false;
+            }
+          })()
+      );
+
+      const vUidCookie = cookiesList.find((c) => c.name === 'v_uid');
+      const vSidCookie = cookiesList.find((c) => c.name === 'v_sid');
+
+      const cleanedCookies = cookiesList.filter((c) => {
+        if (c.name === 'access_token_web' && userToken) {
+          try {
+            const p = JSON.parse(Buffer.from(c.value.split('.')[1], 'base64').toString());
+            if (p.scope === 'public') return false;
+          } catch {}
+        }
+        return true;
+      });
+
+      const domains = ['.vinted.es', 'www.vinted.es', '.vinted.com', 'www.vinted.com'];
+      if (userToken) {
+        for (const d of domains) {
+          cleanedCookies.push({ ...userToken, domain: d });
+          if (vUidCookie) cleanedCookies.push({ ...vUidCookie, domain: d });
+          if (vSidCookie) cleanedCookies.push({ ...vSidCookie, domain: d });
+        }
+      }
+
+      rawData.cookies = cleanedCookies;
+      fs.writeFileSync(COOKIES_PATH, JSON.stringify(rawData, null, 2), 'utf-8');
+      console.log('[VintedBrowser] Sanitized cookies in %s', COOKIES_PATH);
     } catch (_) {}
   }
 
