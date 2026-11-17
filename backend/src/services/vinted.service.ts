@@ -456,20 +456,22 @@ export class VintedBrowserService {
       // 4. Category
       await this.selectCategory(product.vintedCategory || product.category, product.subcategory);
 
-      // 5. Brand (if any)
-      if (product.brand) {
-        await this.selectBrand(product.brand);
-      }
+      // 5. Brand (Marca)
+      await this.selectBrand(product.brand);
 
-      // 6. Condition
+      // 6. Size (Talla)
+      await this.selectSize(product.vintedSize);
+
+      // 7. Condition (Estado) - Всегда берем второй пункт
       await this.selectCondition(product.condition);
 
-      // 7. Size (if provided or required)
-      if (product.vintedSize) {
-        await this.selectSize(product.vintedSize);
-      }
+      // 8. Color (Color)
+      await this.selectColor(product.color);
 
-      // 8. Price: Use vintedPrice if provided, else standard price
+      // 9. Material (Material)
+      await this.selectMaterial((product as any).material);
+
+      // 10. Price: Use vintedPrice if provided, else standard price
       const priceToUse = product.vintedPrice ?? product.price;
       const priceInput = await this.page.waitForSelector(
         'input[data-testid="price-input--input"], #price, input[name="price"]',
@@ -481,13 +483,13 @@ export class VintedBrowserService {
         await this.randomDelay(400, 700);
       }
 
-      // 9. Package size / Shipping (Vinted usually selects standard small/medium by default or offers options)
+      // 11. Package size / Shipping - всегда размер 5 кг (Grande y pesado / 8-package-size / Grande)
       await this.handlePackageSize();
 
       // Wait after photo uploads for Vinted processing & anti-spam cooldown
       await this.page.waitForTimeout(4000);
 
-      // 10. Submit form ("Subir" / "Añadir")
+      // 12. Submit form ("Subir" / "Añadir")
       const submitBtn = await this.page.$(
         'button[data-testid="upload-form-save-button"], button[type="button"]:has-text("Subir"), button[type="submit"]:has-text("Subir")'
       );
@@ -608,84 +610,205 @@ export class VintedBrowserService {
     }
   }
 
-  private async selectBrand(brand: string): Promise<void> {
-    if (!this.page || !brand) return;
+  private async selectBrand(brand?: string | null): Promise<void> {
+    if (!this.page) return;
     try {
-      const brandTrigger = await this.page.$(
-        'input[placeholder*="marca" i], [data-testid="brand_id"], text="Marca"'
+      const brandBtn = await this.page.$(
+        'button[data-testid="brand-select-dropdown-input"], #brand, [data-testid="brand-select-dropdown-input"]'
       );
-      if (brandTrigger) {
-        await brandTrigger.click();
-        await this.page.waitForTimeout(500);
+      if (brandBtn) {
+        await brandBtn.click();
+        await this.page.waitForTimeout(600);
 
-        const searchInput = await this.page.$('input[placeholder*="marca" i], input[type="search"]');
-        if (searchInput) {
-          await searchInput.fill(brand);
-          await this.page.waitForTimeout(800);
-          const matchItem = await this.page.$(`[data-testid*="brand-item"]:has-text("${brand}"), div[role="listbox"] div:has-text("${brand}")`);
-          if (matchItem) {
-            await matchItem.click();
+        let selected = false;
+        const brandQuery = (brand || '').trim();
+        if (brandQuery) {
+          const searchInput = await this.page.$('input[placeholder*="buscar" i], input[type="search"], input[type="text"]');
+          if (searchInput) {
+            await searchInput.fill(brandQuery);
+            await this.page.waitForTimeout(600);
+            const matchItem = await this.page.$(
+              `div[role="menuitem"]:has-text("${brandQuery}"), button:has-text("${brandQuery}"), li:has-text("${brandQuery}")`
+            );
+            if (matchItem) {
+              await matchItem.click();
+              selected = true;
+            }
           }
         }
+
+        // Если бренда нет в списке или не нашли — берем первый который там будет
+        if (!selected) {
+          const firstOption = await this.page.$(
+            'div[role="menuitem"], [role="option"], ul[role="listbox"] li, div[data-bloom="true"] button'
+          );
+          if (firstOption) {
+            await firstOption.click();
+          }
+        }
+        await this.page.waitForTimeout(500);
       }
     } catch (e) {
-      console.warn('[VintedPublish] Brand selection skipped or failed:', e);
+      console.warn('[VintedPublish] Brand selection failed:', e);
     }
   }
 
-  private async selectCondition(wallapopCondition: string): Promise<void> {
+  private async selectCondition(_wallapopCondition?: string): Promise<void> {
     if (!this.page) return;
     try {
-      const conditionMap: Record<string, string> = {
-        new: 'Nuevo con etiquetas',
-        used_like_new: 'En muy buen estado',
-        used_good: 'Bueno',
-        used_fair: 'Aceptable',
-        poor: 'Aceptable',
-      };
-      const textToLook = conditionMap[wallapopCondition] || 'Bueno';
+      // Требование: состояние всегда брать второй пункт
+      const condBtn = await this.page.$(
+        'button[data-testid="category-condition-single-list-input"], #condition, [data-testid="category-condition-single-list-input"]'
+      );
+      if (condBtn) {
+        await condBtn.click();
+        await this.page.waitForTimeout(600);
 
-      // Open condition dropdown/selector if needed
-      const trigger = await this.page.$('text="Estado"');
-      if (trigger) {
-        await trigger.click().catch(() => null);
+        // Ищем все пункты списка и кликаем строго 2-й пункт (индекс 1)
+        const items = await this.page.$$(
+          'div[role="menuitem"], [role="option"], ul li, div[data-bloom="true"] button, label'
+        );
+        if (items.length >= 2) {
+          await items[1].click();
+        } else if (items.length === 1) {
+          await items[0].click();
+        }
         await this.page.waitForTimeout(500);
-      }
-
-      const option = await this.page.$(`label:has-text("${textToLook}"), div:has-text("${textToLook}")`);
-      if (option) {
-        await option.click();
       }
     } catch (e) {
       console.warn('[VintedPublish] Condition selection failed:', e);
     }
   }
 
-  private async selectSize(size: string): Promise<void> {
-    if (!this.page || !size) return;
+  private async selectSize(size?: string | null): Promise<void> {
+    if (!this.page) return;
     try {
-      const sizeTrigger = await this.page.$('text="Talla"');
-      if (sizeTrigger) {
-        await sizeTrigger.click();
-        await this.page.waitForTimeout(500);
-        const sizeOption = await this.page.$(`text="${size}"`);
-        if (sizeOption) {
-          await sizeOption.click();
+      const sizeBtn = await this.page.$(
+        'button[data-testid="category-size-single-grid-input"], #size, [data-testid="category-size-single-grid-input"]'
+      );
+      if (sizeBtn) {
+        await sizeBtn.click();
+        await this.page.waitForTimeout(600);
+
+        let selected = false;
+        if (size && size.trim()) {
+          const sizeOption = await this.page.$(`text="${size.trim()}"`);
+          if (sizeOption) {
+            await sizeOption.click();
+            selected = true;
+          }
         }
+
+        // Если нет в списке — берем первый доступный пункт
+        if (!selected) {
+          const firstOption = await this.page.$(
+            'div[role="menuitem"], [role="option"], ul li, div[data-bloom="true"] button'
+          );
+          if (firstOption) {
+            await firstOption.click();
+          }
+        }
+        await this.page.waitForTimeout(500);
       }
     } catch (e) {
       console.warn('[VintedPublish] Size selection failed:', e);
     }
   }
 
+  private async selectColor(color?: string | null): Promise<void> {
+    if (!this.page) return;
+    try {
+      const colorBtn = await this.page.$(
+        'button[data-testid="color-select-dropdown-input"], #color, [data-testid="color-select-dropdown-input"]'
+      );
+      if (colorBtn) {
+        await colorBtn.click();
+        await this.page.waitForTimeout(600);
+
+        let selected = false;
+        if (color && color.trim()) {
+          const colorOption = await this.page.$(`text="${color.trim()}"`);
+          if (colorOption) {
+            await colorOption.click();
+            selected = true;
+          }
+        }
+
+        // Если нет — берем первый
+        if (!selected) {
+          const firstOption = await this.page.$(
+            'div[role="menuitem"], [role="option"], ul li, div[data-bloom="true"] button'
+          );
+          if (firstOption) {
+            await firstOption.click();
+          }
+        }
+        await this.page.waitForTimeout(500);
+      }
+    } catch (e) {
+      console.warn('[VintedPublish] Color selection failed:', e);
+    }
+  }
+
+  private async selectMaterial(material?: string | null): Promise<void> {
+    if (!this.page) return;
+    try {
+      const matBtn = await this.page.$(
+        'button[data-testid="category-material-multi-list-input"], #material, [data-testid="category-material-multi-list-input"]'
+      );
+      if (matBtn) {
+        await matBtn.click();
+        await this.page.waitForTimeout(600);
+
+        let selected = false;
+        if (material && material.trim()) {
+          const matOption = await this.page.$(`text="${material.trim()}"`);
+          if (matOption) {
+            await matOption.click();
+            selected = true;
+          }
+        }
+
+        if (!selected) {
+          const firstOption = await this.page.$(
+            'div[role="menuitem"], [role="option"], ul li, div[data-bloom="true"] button'
+          );
+          if (firstOption) {
+            await firstOption.click();
+          }
+        }
+        await this.page.waitForTimeout(500);
+      }
+    } catch (e) {
+      console.warn('[VintedPublish] Material selection failed:', e);
+    }
+  }
+
   private async handlePackageSize(): Promise<void> {
     if (!this.page) return;
     try {
-      // By default Vinted selects a parcel size (Pequeño, Mediano, Grande)
-      // If none selected, click 'Pequeño' or 'Mediano'
-      const parcelOption = await this.page.$('label:has-text("Pequeño"), label:has-text("Mediano")');
-      if (parcelOption) {
-        await parcelOption.click();
+      // Требование: размер всегда брать 5 кг (Grande y pesado / 8-package-size / или Grande)
+      const heavyCell = await this.page.$(
+        '[data-testid="8-package-size--cell"], [data-testid="8-package-size--cell--suffix"], #package-size-8, label[for="package_type_selector_8"], [data-testid="package_type_selector_8"]'
+      );
+      if (heavyCell) {
+        await heavyCell.click();
+        return;
+      }
+
+      // Если пункта 8 нет, берем пункт 3 (Grande)
+      const grandCell = await this.page.$(
+        '[data-testid="3-package-size--cell"], #package-size-3, label[for="package_type_selector_3"]'
+      );
+      if (grandCell) {
+        await grandCell.click();
+        return;
+      }
+
+      // Любой radio размера
+      const anyRadio = await this.page.$('input[name*="package_type_selector"]');
+      if (anyRadio) {
+        await anyRadio.click();
       }
     } catch (_) {}
   }
