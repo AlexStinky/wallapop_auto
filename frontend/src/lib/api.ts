@@ -121,13 +121,13 @@ export async function deleteProduct(id: string): Promise<void> {
   await api.delete(`/products/${id}`);
 }
 
-export async function publishProduct(id: string): Promise<Product> {
-  const { data } = await api.post<Product>(`/products/${id}/publish`);
+export async function publishProduct(id: string, platform?: 'wallapop' | 'vinted' | 'both'): Promise<Product> {
+  const { data } = await api.post<Product>(`/products/${id}/publish`, { platform });
   return data;
 }
 
-export async function publishProductNow(id: string): Promise<{ message: string; productId: string }> {
-  const { data } = await api.post<{ message: string; productId: string }>(`/products/${id}/publish-now`);
+export async function publishProductNow(id: string, platform?: 'wallapop' | 'vinted' | 'both'): Promise<{ message: string; productId: string }> {
+  const { data } = await api.post<{ message: string; productId: string }>(`/products/${id}/publish-now`, { platform });
   return data;
 }
 

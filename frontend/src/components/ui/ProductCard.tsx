@@ -11,7 +11,7 @@ import { Card } from './Card';
 
 interface ProductCardProps {
   product: Product;
-  onPublish?: (id: string) => void;
+  onPublish?: (id: string, platform?: 'wallapop' | 'vinted' | 'both') => void;
   onDelete?: (id: string) => void;
   loading?: boolean;
 }
@@ -96,68 +96,94 @@ export function ProductCard({ product, onPublish, onDelete, loading }: ProductCa
       </div>
 
       {/* Actions */}
-      <div className="flex gap-1.5 border-t border-gray-50 px-3 py-2">
-        {product.status === 'published' ? (
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => onPublish?.(product.id)}
-            loading={loading}
-            className="flex-1"
-          >
-            <RotateCcw size={13} />
-            Опублікувати повторно
-          </Button>
-        ) : (
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => onPublish?.(product.id)}
-            loading={loading}
-            className="flex-1"
-          >
-            <Send size={13} />
-            Опублікувати зараз
-          </Button>
-        )}
-        <Link
-          href={`/products/${product.id}`}
-          className="inline-flex items-center justify-center px-3 py-1.5 text-sm rounded-lg bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 shadow-sm active:scale-95"
-          title="Редагувати / Переглянути"
-        >
-          <Edit size={13} />
-        </Link>
-        {confirmDelete ? (
-          <>
+      <div className="flex flex-col gap-1.5 border-t border-gray-50 px-3 py-2">
+        <div className="flex gap-1.5">
+          {product.status === 'published' ? (
             <Button
-              variant="danger"
+              variant="secondary"
               size="sm"
-              onClick={() => {
-                onDelete?.(product.id);
-                setConfirmDelete(false);
-              }}
+              onClick={() => onPublish?.(product.id, 'both')}
+              loading={loading}
               className="flex-1"
             >
-              Підтвердити
+              <RotateCcw size={13} />
+              Опублікувати повторно
             </Button>
+          ) : (
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => onPublish?.(product.id, 'both')}
+              loading={loading}
+              className="flex-1"
+            >
+              <Send size={13} />
+              Опублікувати зараз
+            </Button>
+          )}
+          <Link
+            href={`/products/${product.id}`}
+            className="inline-flex items-center justify-center px-3 py-1.5 text-sm rounded-lg bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 shadow-sm active:scale-95"
+            title="Редагувати / Переглянути"
+          >
+            <Edit size={13} />
+          </Link>
+          {confirmDelete ? (
+            <>
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={() => {
+                  onDelete?.(product.id);
+                  setConfirmDelete(false);
+                }}
+                className="flex-1"
+              >
+                Підтвердити
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setConfirmDelete(false)}
+              >
+                Скасувати
+              </Button>
+            </>
+          ) : (
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setConfirmDelete(false)}
+              onClick={() => setConfirmDelete(true)}
+              className="text-red-400 hover:text-red-600"
             >
-              Скасувати
+              <Trash2 size={13} />
             </Button>
-          </>
-        ) : (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setConfirmDelete(true)}
-            className="text-red-400 hover:text-red-600"
+          )}
+        </div>
+
+        {/* Separate platform publish buttons */}
+        <div className="flex gap-1.5 pt-0.5">
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => onPublish?.(product.id, 'wallapop')}
+            className="flex-1 rounded-lg border border-[#00C9A7]/40 bg-[#00C9A7]/5 py-1.5 px-2 text-[11px] font-semibold text-[#008F75] hover:bg-[#00C9A7]/15 active:scale-95 transition-all flex items-center justify-center gap-1 disabled:opacity-50"
+            title="Опублікувати тільки на Wallapop"
           >
-            <Trash2 size={13} />
-          </Button>
-        )}
+            <Send size={11} className="text-[#00C9A7]" />
+            Опублікувати на Wallapop
+          </button>
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => onPublish?.(product.id, 'vinted')}
+            className="flex-1 rounded-lg border border-[#09B1BA]/40 bg-[#09B1BA]/5 py-1.5 px-2 text-[11px] font-semibold text-[#07858c] hover:bg-[#09B1BA]/15 active:scale-95 transition-all flex items-center justify-center gap-1 disabled:opacity-50"
+            title="Опублікувати тільки на Vinted"
+          >
+            <Send size={11} className="text-[#09B1BA]" />
+            Опублікувати на Vinted
+          </button>
+        </div>
       </div>
     </Card>
   );

@@ -73,12 +73,13 @@ export default function ProductDetailPage() {
     fetch();
   }, [id, router]);
 
-  const handlePublish = async () => {
+  const handlePublish = async (platform?: 'wallapop' | 'vinted' | 'both') => {
     if (!product) return;
     setPublishing(true);
     try {
-      await publishProductNow(product.id);
-      toast.success('Публікацію запущено!');
+      await publishProductNow(product.id, platform);
+      const targetLabel = platform === 'wallapop' ? 'на Wallapop' : platform === 'vinted' ? 'на Vinted' : '';
+      toast.success(`Публікацію ${targetLabel} запущено!`.trim());
       const updated = await getProduct(id);
       setProduct(updated);
 
@@ -89,13 +90,33 @@ export default function ProductDetailPage() {
         try {
           const fresh = await getProduct(id);
           setProduct(fresh);
-          if (fresh && fresh.status !== 'publishing') {
+          const isDone = platform === 'wallapop'
+            ? fresh?.wallapopStatus !== 'publishing'
+            : platform === 'vinted'
+            ? fresh?.vintedStatus !== 'publishing'
+            : fresh?.status !== 'publishing';
+
+          if (fresh && isDone) {
             clearInterval(pollTimer);
             setPublishing(false);
-            if (fresh.status === 'published') {
-              toast.success('Товар успішно опубліковано на Wallapop!');
-            } else if (fresh.status === 'error') {
-              toast.error(fresh.errorMessage || 'Помилка публікації на Wallapop', { duration: 6000 });
+            if (platform === 'wallapop') {
+              if (fresh.wallapopStatus === 'published') {
+                toast.success('Товар успішно опубліковано на Wallapop!');
+              } else if (fresh.wallapopStatus === 'error') {
+                toast.error(fresh.errorMessage || 'Помилка публікації на Wallapop', { duration: 6000 });
+              }
+            } else if (platform === 'vinted') {
+              if (fresh.vintedStatus === 'published') {
+                toast.success('Товар успішно опубліковано на Vinted!');
+              } else if (fresh.vintedStatus === 'error') {
+                toast.error(fresh.errorMessage || 'Помилка публікації на Vinted', { duration: 6000 });
+              }
+            } else {
+              if (fresh.status === 'published') {
+                toast.success('Товар успішно опубліковано!');
+              } else if (fresh.status === 'error') {
+                toast.error(fresh.errorMessage || 'Помилка публікації', { duration: 6000 });
+              }
             }
           }
         } catch (_) {}
@@ -273,36 +294,60 @@ export default function ProductDetailPage() {
         )}
 
         {/* Action buttons */}
-        <div className="flex gap-2">
-          {product.status === 'published' ? (
-            <Button
-              variant="primary"
-              size="lg"
-              onClick={handlePublish}
-              loading={publishing}
-              fullWidth
+        <div className="flex flex-col gap-2.5">
+          <div className="flex gap-2">
+            {product.status === 'published' ? (
+              <Button
+                variant="primary"
+                size="lg"
+                onClick={() => handlePublish('both')}
+                loading={publishing}
+                fullWidth
+              >
+                <RotateCcw size={16} />
+                Опублікувати повторно
+              </Button>
+            ) : (
+              <Button
+                variant="primary"
+                size="lg"
+                onClick={() => handlePublish('both')}
+                loading={publishing}
+                fullWidth
+              >
+                <Send size={16} />
+                Опублікувати зараз
+              </Button>
+            )}
+            <Link href={`/products/${product.id}/edit`} className="flex-1">
+              <Button variant="secondary" size="lg" fullWidth>
+                <Edit size={16} />
+                Редагувати
+              </Button>
+            </Link>
+          </div>
+
+          {/* Separate platform publish buttons */}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={publishing}
+              onClick={() => handlePublish('wallapop')}
+              className="flex-1 rounded-xl border border-[#00C9A7] bg-[#00C9A7]/10 py-2.5 px-3 text-xs sm:text-sm font-semibold text-[#008F75] shadow-sm hover:bg-[#00C9A7]/20 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
             >
-              <RotateCcw size={16} />
-              Опублікувати повторно
-            </Button>
-          ) : (
-            <Button
-              variant="primary"
-              size="lg"
-              onClick={handlePublish}
-              loading={publishing}
-              fullWidth
+              <Send size={14} className="text-[#00C9A7]" />
+              Опублікувати на Wallapop
+            </button>
+            <button
+              type="button"
+              disabled={publishing}
+              onClick={() => handlePublish('vinted')}
+              className="flex-1 rounded-xl border border-[#09B1BA] bg-[#09B1BA]/10 py-2.5 px-3 text-xs sm:text-sm font-semibold text-[#07858c] shadow-sm hover:bg-[#09B1BA]/20 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
             >
-              <Send size={16} />
-              Опублікувати зараз
-            </Button>
-          )}
-          <Link href={`/products/${product.id}/edit`} className="flex-1">
-            <Button variant="secondary" size="lg" fullWidth>
-              <Edit size={16} />
-              Редагувати
-            </Button>
-          </Link>
+              <Send size={14} className="text-[#09B1BA]" />
+              Опублікувати на Vinted
+            </button>
+          </div>
         </div>
 
         {/* Delete */}

@@ -32,11 +32,12 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, []);
 
-  const handlePublish = async (id: string) => {
+  const handlePublish = async (id: string, platform?: 'wallapop' | 'vinted' | 'both') => {
     setPublishingId(id);
     try {
-      await publishProductNow(id);
-      toast.success('Публікацію запущено!');
+      await publishProductNow(id, platform);
+      const targetLabel = platform === 'wallapop' ? 'на Wallapop' : platform === 'vinted' ? 'на Vinted' : '';
+      toast.success(`Публікацію ${targetLabel} запущено!`.trim());
       await fetchProducts();
 
       // Poll until product finishes publishing
@@ -47,13 +48,33 @@ export default function DashboardPage() {
           const freshProducts = await getProducts();
           setProducts(freshProducts);
           const current = freshProducts.find((p) => p.id === id);
-          if (current && current.status !== 'publishing') {
+          const isDone = platform === 'wallapop'
+            ? current?.wallapopStatus !== 'publishing'
+            : platform === 'vinted'
+            ? current?.vintedStatus !== 'publishing'
+            : current?.status !== 'publishing';
+
+          if (current && isDone) {
             clearInterval(pollTimer);
             setPublishingId(null);
-            if (current.status === 'published') {
-              toast.success('Товар успішно опубліковано на Wallapop!');
-            } else if (current.status === 'error') {
-              toast.error(current.errorMessage || 'Помилка публікації на Wallapop', { duration: 6000 });
+            if (platform === 'wallapop') {
+              if (current.wallapopStatus === 'published') {
+                toast.success('Товар успішно опубліковано на Wallapop!');
+              } else if (current.wallapopStatus === 'error') {
+                toast.error(current.errorMessage || 'Помилка публікації на Wallapop', { duration: 6000 });
+              }
+            } else if (platform === 'vinted') {
+              if (current.vintedStatus === 'published') {
+                toast.success('Товар успішно опубліковано на Vinted!');
+              } else if (current.vintedStatus === 'error') {
+                toast.error(current.errorMessage || 'Помилка публікації на Vinted', { duration: 6000 });
+              }
+            } else {
+              if (current.status === 'published') {
+                toast.success('Товар успішно опубліковано!');
+              } else if (current.status === 'error') {
+                toast.error(current.errorMessage || 'Помилка публікації', { duration: 6000 });
+              }
             }
           }
         } catch (_) {}

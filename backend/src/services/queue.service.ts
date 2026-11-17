@@ -175,13 +175,22 @@ class QueueService {
   }
 
   // Helper: Publish a product to Wallapop, Vinted, or both based on flags
-  private async publishToBothPlatforms(product: any, headless: boolean): Promise<{ success: boolean; error?: string }> {
+  private async publishToBothPlatforms(
+    product: any,
+    headless: boolean,
+    platformOverride?: 'wallapop' | 'vinted' | 'both'
+  ): Promise<{ success: boolean; error?: string }> {
     const errors: string[] = [];
     let wallapopSuccess = false;
     let vintedSuccess = false;
 
-    const shouldPublishWallapop = product.publishToWallapop !== false;
-    const shouldPublishVinted = product.publishToVinted !== false;
+    const shouldPublishWallapop = platformOverride
+      ? (platformOverride === 'wallapop' || platformOverride === 'both')
+      : product.publishToWallapop !== false;
+
+    const shouldPublishVinted = platformOverride
+      ? (platformOverride === 'vinted' || platformOverride === 'both')
+      : product.publishToVinted !== false;
 
     // 1. Publish to Wallapop (if enabled)
     if (shouldPublishWallapop) {
@@ -298,8 +307,15 @@ class QueueService {
   }
 
   // Публікація ТІЛЬКИ цього одного товару прямо зараз (без черги)
-  async publishDirectly(productId: string): Promise<{ success: boolean; error?: string }> {
-    console.log('[DirectPublish] Publishing single product directly to both sites: %s', productId);
+  async publishDirectly(
+    productId: string,
+    platformOverride?: 'wallapop' | 'vinted' | 'both'
+  ): Promise<{ success: boolean; error?: string }> {
+    console.log(
+      '[DirectPublish] Publishing single product directly (%s): %s',
+      platformOverride || 'all configured',
+      productId
+    );
 
     const product = await prisma.product.findUnique({ where: { id: productId } });
     if (!product) return { success: false, error: 'Product not found' };
@@ -307,14 +323,24 @@ class QueueService {
     // Remove from in-memory queue if it was queued
     this.state.items = this.state.items.filter((item) => item.productId !== productId);
 
+    const shouldWallapop = platformOverride
+      ? platformOverride === 'wallapop' || platformOverride === 'both'
+      : product.publishToWallapop !== false;
+
+    const shouldVinted = platformOverride
+      ? platformOverride === 'vinted' || platformOverride === 'both'
+      : product.publishToVinted !== false;
+
+    const updateData: any = {
+      status: 'publishing',
+      errorMessage: null,
+    };
+    if (shouldWallapop) updateData.wallapopStatus = 'publishing';
+    if (shouldVinted) updateData.vintedStatus = 'publishing';
+
     await prisma.product.update({
       where: { id: productId },
-      data: {
-        status: 'publishing',
-        wallapopStatus: 'publishing',
-        vintedStatus: 'publishing',
-        errorMessage: null,
-      },
+      data: updateData,
     }).catch(() => null);
     this.broadcast();
 
@@ -322,7 +348,7 @@ class QueueService {
     const headless = settings?.headless ?? true;
 
     try {
-      const result = await this.publishToBothPlatforms(product, headless);
+      const result = await this.publishToBothPlatforms(product, headless, platformOverride);
       this.broadcast();
       return result;
     } catch (err: any) {

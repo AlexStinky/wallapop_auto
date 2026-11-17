@@ -264,10 +264,12 @@ router.post('/:id/publish', async (req, res, next) => {
         const product = await prisma_1.default.product.findUnique({ where: { id: req.params.id } });
         if (!product)
             throw (0, error_1.createError)('Product not found', 404);
-        queue_service_1.queueService.publishDirectly(product.id).catch((err) => {
+        const platform = (req.body?.platform || req.query?.platform);
+        queue_service_1.queueService.publishDirectly(product.id, platform).catch((err) => {
             console.error('[PublishDirectly] Error publishing directly:', err);
         });
-        res.json({ message: 'Публікацію запущено відразу', productId: product.id });
+        const targetDesc = platform === 'wallapop' ? 'на Wallapop' : platform === 'vinted' ? 'на Vinted' : 'відразу';
+        res.json({ message: `Публікацію ${targetDesc} запущено`, productId: product.id });
     }
     catch (err) {
         next(err);
@@ -279,10 +281,12 @@ router.post('/:id/publish-now', async (req, res, next) => {
         const product = await prisma_1.default.product.findUnique({ where: { id: req.params.id } });
         if (!product)
             throw (0, error_1.createError)('Product not found', 404);
-        queue_service_1.queueService.publishDirectly(product.id).catch((err) => {
+        const platform = (req.body?.platform || req.query?.platform);
+        queue_service_1.queueService.publishDirectly(product.id, platform).catch((err) => {
             console.error('[PublishNow] Error publishing directly:', err);
         });
-        res.json({ message: 'Публікацію запущено відразу', productId: product.id });
+        const targetDesc = platform === 'wallapop' ? 'на Wallapop' : platform === 'vinted' ? 'на Vinted' : 'відразу';
+        res.json({ message: `Публікацію ${targetDesc} запущено`, productId: product.id });
     }
     catch (err) {
         next(err);
