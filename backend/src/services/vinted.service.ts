@@ -484,6 +484,9 @@ export class VintedBrowserService {
       // 9. Package size / Shipping (Vinted usually selects standard small/medium by default or offers options)
       await this.handlePackageSize();
 
+      // Wait after photo uploads for Vinted processing & anti-spam cooldown
+      await this.page.waitForTimeout(4000);
+
       // 10. Submit form ("Subir" / "Añadir")
       const submitBtn = await this.page.$(
         'button[data-testid="upload-form-save-button"], button[type="button"]:has-text("Subir"), button[type="submit"]:has-text("Subir")'
@@ -491,6 +494,8 @@ export class VintedBrowserService {
 
       if (submitBtn) {
         console.log('[VintedPublish] Clicking submit button...');
+        await submitBtn.scrollIntoViewIfNeeded().catch(() => null);
+        await this.page.waitForTimeout(500);
         await submitBtn.click();
 
         // Wait for redirect to item page or profile
@@ -510,11 +515,38 @@ export class VintedBrowserService {
           };
         }
 
+        // Check if modal error ("Se ha producido un error") appeared
+        const modalError = await this.page.$('h1:has-text("Se ha producido un error"), h2:has-text("Se ha producido un error"), div:has-text("Se ha producido un error")');
+        if (modalError) {
+          // If modal error appeared, let's retry clicking Subir once after 3 seconds
+          console.warn('[VintedPublish] Modal error appeared, dismissing and retrying...');
+          const closeOrRefresh = await this.page.$('button:has-text("Actualizar página"), [data-testid="modal-close"]');
+          if (closeOrRefresh) {
+            await closeOrRefresh.click().catch(() => null);
+            await this.page.waitForTimeout(3000);
+            await submitBtn.click().catch(() => null);
+            await this.page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => null);
+            await this.page.waitForTimeout(3000);
+          }
+        }
+
+        const retryUrl = this.page.url();
+        if (retryUrl.includes('/items/') && !retryUrl.includes('/items/new')) {
+          const match = retryUrl.match(/\/items\/(\d+)/);
+          return {
+            success: true,
+            vintedId: match ? match[1] : undefined,
+            url: retryUrl,
+          };
+        }
+
         // Check if there was an error message on the page
         const errorElem = await this.page.$('[class*="FormHelpText--error"], [role="alert"]');
         if (errorElem) {
           const errText = await errorElem.innerText();
-          return { success: false, error: `Помилка форми Vinted: ${errText}` };
+          if (errText && errText.trim()) {
+            return { success: false, error: `Помилка форми Vinted: ${errText.trim()}` };
+          }
         }
 
         return {
@@ -541,7 +573,7 @@ export class VintedBrowserService {
   // ─── Field Helpers ──────────────────────────────────────────────────────────
 
   private async selectCategory(categoryName?: string, subcategoryName?: string | null): Promise<void> {
-    if (!this.page || !categoryName) return;
+    if (!this.page) return;
     try {
       const categoryTrigger = await this.page.$(
         'button[data-testid="catalog-select-dropdown-input"], #category, input[name="category"]'
@@ -550,8 +582,14 @@ export class VintedBrowserService {
         await categoryTrigger.click();
         await this.page.waitForTimeout(800);
 
-        // Try to click option with categoryName
-        const option = await this.page.$(`text="${categoryName}"`);
+        // Try exact match or fallback category (Hogar, Electrónica, etc.)
+        const mainCat = categoryName || 'Hogar';
+        let option = await this.page.$(`text="${mainCat}"`);
+        if (!option) {
+          // If custom category not matched, fallback to Hogar
+          option = await this.page.$('text="Hogar"');
+        }
+
         if (option) {
           await option.click();
           await this.page.waitForTimeout(600);
