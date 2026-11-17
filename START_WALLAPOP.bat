@@ -14,11 +14,14 @@ cd /d %~dp0
 netsh advfirewall firewall add rule name="Wallapop Port 3000" dir=in action=allow protocol=TCP localport=3000 profile=any enable=yes >nul 2>&1
 netsh advfirewall firewall add rule name="Wallapop Port 3001" dir=in action=allow protocol=TCP localport=3001 profile=any enable=yes >nul 2>&1
 
+:: Ensure MongoDB service is running if installed
+net start MongoDB >nul 2>&1
+
 :: Detect local IP address dynamically
 set LOCAL_IP=
-for /f "delims=" %%a in ('powershell -NoProfile -Command "(Get-NetIPConfiguration | Where-Object { $_.IPv4DefaultGateway -ne $null } | Select-Object -ExpandProperty IPv4Address | Select-Object -ExpandProperty IPAddress -First 1)"') do set LOCAL_IP=%%a
+for /f "delims=" %%a in ('powershell -NoProfile -Command "(Get-NetIPAddress -AddressFamily IPv4 -InterfaceAlias 'Wi-Fi*', 'Ethernet*', 'Беспроводная сеть*' -ErrorAction SilentlyContinue | Where-Object IPAddress -notmatch '^(127\.|169\.254\.)' | Select-Object -ExpandProperty IPAddress -First 1)"') do set LOCAL_IP=%%a
 if "%LOCAL_IP%"=="" (
-    for /f "delims=" %%a in ('powershell -NoProfile -Command "(Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notmatch 'Loopback|vEthernet|Virtual|WSL' -and $_.IPAddress -notmatch '^127\.|^169\.254\.' } | Select-Object -ExpandProperty IPAddress -First 1)"') do set LOCAL_IP=%%a
+    for /f "delims=" %%a in ('powershell -NoProfile -Command "(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object IPAddress -notmatch '^(127\.|169\.254\.)' | Select-Object -ExpandProperty IPAddress -First 1)"') do set LOCAL_IP=%%a
 )
 if "%LOCAL_IP%"=="" set LOCAL_IP=localhost
 
@@ -68,7 +71,7 @@ echo - Starting Backend (port 3001)...
 start "Wallapop Backend" cmd /k "cd /d %~dp0backend && title Wallapop Backend && node dist/index.js"
 
 echo - Starting Frontend (port 3000)...
-start "Wallapop Frontend" cmd /k "cd /d %~dp0frontend && title Wallapop Frontend && npm start -- -H 0.0.0.0"
+start "Wallapop Frontend" cmd /k "cd /d %~dp0frontend && title Wallapop Frontend && npm start"
 
 echo.
 echo Waiting 5 seconds for services to initialize...
