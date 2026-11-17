@@ -186,7 +186,7 @@ export class VintedBrowserService {
       });
 
       this.page = await this.context.newPage();
-      await this.page.goto('https://www.vinted.es/member/general/login', { waitUntil: 'domcontentloaded' }).catch(() => null);
+      await this.page.goto('https://www.vinted.com/member/login/email', { waitUntil: 'domcontentloaded' }).catch(() => null);
       await this.acceptCookies(this.page);
 
       console.log('[VintedBrowser] Waiting for user to complete manual login (max %ds)...', maxWaitMs / 1000);
@@ -202,14 +202,15 @@ export class VintedBrowserService {
 
         const currentUrl = this.page.url();
         if (
-          currentUrl.includes('vinted.es') &&
+          currentUrl.includes('vinted.') &&
+          !currentUrl.includes('/member/login') &&
           !currentUrl.includes('/member/general/login') &&
           !currentUrl.includes('/auth') &&
           !currentUrl.includes('/login')
         ) {
           // Additional check for logged-in indicator
           const hasUserAvatar = await this.page.$('[data-testid="header-user-avatar"], [data-testid="header-avatar"], a[href*="/member/"]').catch(() => null);
-          if (hasUserAvatar || currentUrl.includes('/items/new') || currentUrl.includes('/feed') || currentUrl === 'https://www.vinted.es/') {
+          if (hasUserAvatar || currentUrl.includes('/items/new') || currentUrl.includes('/feed') || currentUrl.endsWith('.vinted.com/') || currentUrl.endsWith('.vinted.es/')) {
             loggedIn = true;
             console.log('[VintedBrowser] Detected successful login! URL: %s', currentUrl);
             await this.randomDelay(2000, 3000);
@@ -293,7 +294,7 @@ export class VintedBrowserService {
     if (!this.page) return false;
     try {
       console.log('[VintedBrowser] Navigating to login page...');
-      await this.page.goto('https://www.vinted.es/member/general/login', { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await this.page.goto('https://www.vinted.com/member/login/email', { waitUntil: 'domcontentloaded', timeout: 30000 });
       await this.acceptCookies(this.page);
       await this.page.waitForTimeout(1500);
 
