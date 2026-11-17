@@ -54,6 +54,25 @@ export class VintedBrowserService {
       storageState: fs.existsSync(COOKIES_PATH) ? COOKIES_PATH : undefined,
     });
 
+    // Ensure session cookies from vinted.com also apply to vinted.es and vice versa
+    if (fs.existsSync(COOKIES_PATH)) {
+      try {
+        const rawData = JSON.parse(fs.readFileSync(COOKIES_PATH, 'utf-8'));
+        const cookiesList: any[] = rawData.cookies || [];
+        const extraCookies: any[] = [];
+        for (const c of cookiesList) {
+          if (c.domain && c.domain.includes('vinted.com')) {
+            extraCookies.push({ ...c, domain: c.domain.replace('vinted.com', 'vinted.es') });
+          } else if (c.domain && c.domain.includes('vinted.es')) {
+            extraCookies.push({ ...c, domain: c.domain.replace('vinted.es', 'vinted.com') });
+          }
+        }
+        if (extraCookies.length > 0) {
+          await this.context.addCookies(extraCookies).catch(() => null);
+        }
+      } catch (_) {}
+    }
+
     await this.context.addInitScript(() => {
       Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
       Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
@@ -272,17 +291,28 @@ export class VintedBrowserService {
   async isLoggedIn(): Promise<boolean> {
     if (!this.page) return false;
     try {
+      // Try visiting /items/new first on vinted.es, fallback to vinted.com if needed
       await this.page.goto('https://www.vinted.es/items/new', { waitUntil: 'domcontentloaded', timeout: 30000 });
       await this.acceptCookies(this.page);
       await this.page.waitForTimeout(2000);
 
-      const url = this.page.url();
-      if (url.includes('/login') || url.includes('/member/general/login') || url.includes('/auth')) {
+      let url = this.page.url();
+      if (url.includes('/login') || url.includes('/member/general/login') || url.includes('/auth') || url.includes('/register')) {
+        // Try on vinted.com
+        await this.page.goto('https://www.vinted.com/items/new', { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await this.acceptCookies(this.page);
+        await this.page.waitForTimeout(2000);
+        url = this.page.url();
+      }
+
+      if (url.includes('/login') || url.includes('/member/general/login') || url.includes('/auth') || url.includes('/register')) {
         return false;
       }
 
       // Check if title input or photo upload input is visible on /items/new
-      const uploadArea = await this.page.$('input[type="file"], input[name="title"], textarea[name="description"]');
+      const uploadArea = await this.page.$(
+        'input[data-testid="add-photos-input"], input[type="file"], input[data-testid="title--input"], input[name="title"]'
+      );
       return Boolean(uploadArea);
     } catch (err) {
       console.warn('[VintedBrowser] isLoggedIn check failed:', err);
@@ -350,8 +380,16 @@ export class VintedBrowserService {
       await this.acceptCookies(this.page);
       await this.page.waitForTimeout(2000);
 
-      // Check if redirected to login
-      if (this.page.url().includes('/login') || this.page.url().includes('/auth')) {
+      // If redirected to login/register on .es, try on .com
+      if (this.page.url().includes('/login') || this.page.url().includes('/auth') || this.page.url().includes('/register')) {
+        console.log('[VintedPublish] Redirected on .es (%s), attempting on .com...', this.page.url());
+        await this.page.goto('https://www.vinted.com/items/new', { waitUntil: 'domcontentloaded', timeout: 45000 });
+        await this.acceptCookies(this.page);
+        await this.page.waitForTimeout(2000);
+      }
+
+      // Check if still redirected to login
+      if (this.page.url().includes('/login') || this.page.url().includes('/auth') || this.page.url().includes('/register')) {
         return { success: false, error: 'Сесія Vinted не авторизована. Виконайте вхід у Налаштуваннях.' };
       }
 
