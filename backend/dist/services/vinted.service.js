@@ -371,7 +371,7 @@ class VintedBrowserService {
                 }).filter((p) => fs.existsSync(p));
                 if (absoluteImagePaths.length > 0) {
                     console.log('[VintedPublish] Uploading %d photos (skipped first 2): %j', absoluteImagePaths.length, absoluteImagePaths);
-                    const fileInput = await this.page.waitForSelector('input[type="file"][accept*="image"], input[type="file"]', { timeout: 10000 });
+                    const fileInput = await this.page.waitForSelector('input[data-testid="add-photos-input"], input[name="photos"], input[type="file"][accept*="image"]', { timeout: 10000 });
                     if (fileInput) {
                         await fileInput.setInputFiles(absoluteImagePaths);
                         // Give time for uploads to process
@@ -381,7 +381,7 @@ class VintedBrowserService {
             }
             // 2. Title: Use specific vintedTitle if provided, else fallback to standard title
             const titleToUse = (product.vintedTitle || product.title).trim();
-            const titleInput = await this.page.waitForSelector('input[name="title"], #title, input[placeholder*="título" i]', { timeout: 10000 });
+            const titleInput = await this.page.waitForSelector('input[data-testid="title--input"], #title, input[name="title"]', { timeout: 10000 });
             if (titleInput) {
                 await titleInput.click();
                 await titleInput.fill(titleToUse);
@@ -389,7 +389,7 @@ class VintedBrowserService {
             }
             // 3. Description: Use specific vintedDescription if provided, else fallback
             const descToUse = (product.vintedDescription || product.description).trim();
-            const descInput = await this.page.waitForSelector('textarea[name="description"], #description, textarea[placeholder*="descripción" i]', { timeout: 10000 });
+            const descInput = await this.page.waitForSelector('textarea[data-testid="description--input"], #description, textarea[name="description"]', { timeout: 10000 });
             if (descInput) {
                 await descInput.click();
                 await descInput.fill(descToUse);
@@ -409,7 +409,7 @@ class VintedBrowserService {
             }
             // 8. Price: Use vintedPrice if provided, else standard price
             const priceToUse = product.vintedPrice ?? product.price;
-            const priceInput = await this.page.waitForSelector('input[name="price"], #price, input[placeholder*="0,00"], input[placeholder*="0.00"]', { timeout: 10000 });
+            const priceInput = await this.page.waitForSelector('input[data-testid="price-input--input"], #price, input[name="price"]', { timeout: 10000 });
             if (priceInput) {
                 await priceInput.click();
                 await priceInput.fill(priceToUse.toString().replace('.', ','));
@@ -418,7 +418,7 @@ class VintedBrowserService {
             // 9. Package size / Shipping (Vinted usually selects standard small/medium by default or offers options)
             await this.handlePackageSize();
             // 10. Submit form ("Subir" / "Añadir")
-            const submitBtn = await this.page.$('button[type="submit"]:has-text("Subir"), button[type="submit"]:has-text("Añadir"), button:has-text("Subir artículo"), button:has-text("Añadir artículo")');
+            const submitBtn = await this.page.$('button[data-testid="upload-form-save-button"], button[type="button"]:has-text("Subir"), button[type="submit"]:has-text("Subir")');
             if (submitBtn) {
                 console.log('[VintedPublish] Clicking submit button...');
                 await submitBtn.click();
@@ -469,7 +469,7 @@ class VintedBrowserService {
         if (!this.page || !categoryName)
             return;
         try {
-            const categoryTrigger = await this.page.$('input[name="catalog_id"], [data-testid="catalog_id"], button:has-text("Categoría"), div:has-text("Categoría")');
+            const categoryTrigger = await this.page.$('button[data-testid="catalog-select-dropdown-input"], #category, input[name="category"]');
             if (categoryTrigger) {
                 await categoryTrigger.click();
                 await this.page.waitForTimeout(800);
