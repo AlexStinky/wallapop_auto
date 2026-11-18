@@ -16,6 +16,11 @@ model Product {
   subcategory  String?
   condition    String
   brand        String?
+  model        String?
+  year         Int?
+  style        String?
+  material     String?
+  location     String?
   color        String?
   weight       String?
   quantity     Int      @default(1)

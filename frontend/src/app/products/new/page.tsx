@@ -42,7 +42,7 @@ const schema = z.object({
   vintedSize: z.string().optional(),
   vintedTitle: z.string().optional(),
   vintedDescription: z.string().optional(),
-  vintedPrice: z.coerce.number().positive().optional(),
+  vintedPrice: z.string().optional(),
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -115,6 +115,7 @@ export default function NewProductPage() {
     formState: { errors },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
+    shouldUnregister: false,
     defaultValues: {
       images: [],
       category: '',
@@ -124,6 +125,18 @@ export default function NewProductPage() {
       weight: '2-5kg',
       publishToWallapop: true,
       publishToVinted: true,
+      vintedCategory: '',
+      vintedSize: '',
+      vintedTitle: '',
+      vintedDescription: '',
+      vintedPrice: '',
+      brand: '',
+      model: '',
+      year: '',
+      style: '',
+      material: '',
+      location: '',
+      color: '',
     },
   });
 
@@ -184,7 +197,7 @@ export default function NewProductPage() {
         description: values.description,
         price: values.price,
         category: values.category?.trim() || values.title.trim().slice(0, 50),
-        subcategory: undefined,
+        subcategory: values.subcategory?.trim() || undefined,
         condition: values.condition,
         brand: values.brand?.trim() || undefined,
         model: values.model?.trim() || undefined,
@@ -202,7 +215,7 @@ export default function NewProductPage() {
         vintedSize: values.vintedSize?.trim() || undefined,
         vintedTitle: values.vintedTitle?.trim() || undefined,
         vintedDescription: values.vintedDescription?.trim() || undefined,
-        vintedPrice: values.vintedPrice,
+        vintedPrice: values.vintedPrice && !isNaN(parseFloat(values.vintedPrice)) ? parseFloat(values.vintedPrice) : undefined,
         status: 'in_queue',
         publishNow: mode === 'publish_now',
       });
@@ -574,134 +587,135 @@ export default function NewProductPage() {
             </p>
           </div>
 
-          {showVintedFields && (
-            <div className="space-y-3.5 rounded-2xl border border-[#09B1BA]/30 bg-[#09B1BA]/5 p-4">
-              <h3 className="text-xs font-bold uppercase tracking-wide text-[#09B1BA]">
-                Параметри для Vinted (Опціонально)
-              </h3>
+          <div
+            className={cn(
+              'space-y-3.5 rounded-2xl border border-[#09B1BA]/30 bg-[#09B1BA]/5 p-4 transition-all',
+              !showVintedFields && 'hidden'
+            )}
+          >
+            <h3 className="text-xs font-bold uppercase tracking-wide text-[#09B1BA]">
+              Параметри для Vinted (Опціонально)
+            </h3>
 
-              {/* Vinted Category */}
-              <div className="rounded-xl border border-gray-200 bg-white p-3 focus-within:border-[#09B1BA]">
-                <label className="block text-xs font-normal text-gray-500">Категорія Vinted (наприклад: Mujer, Hombre, Niños, Hogar)</label>
-                <input
-                  {...register('vintedCategory')}
-                  type="text"
-                  placeholder="Залиште порожнім, щоб використати основну"
-                  className="w-full text-sm font-semibold text-gray-900 placeholder:text-gray-300 focus:outline-none bg-transparent mt-0.5"
-                />
-              </div>
-
-              {/* Vinted Size */}
-              <div className="rounded-xl border border-gray-200 bg-white p-3 focus-within:border-[#09B1BA]">
-                <label className="block text-xs font-normal text-gray-500">Розмір / Talla (XS, S, M, L, XL, 42...)</label>
-                <input
-                  {...register('vintedSize')}
-                  type="text"
-                  placeholder="Вкажіть розмір для одягу або взуття"
-                  className="w-full text-sm font-semibold text-gray-900 placeholder:text-gray-300 focus:outline-none bg-transparent mt-0.5"
-                />
-              </div>
-
-              {/* Vinted Title */}
-              <div className="rounded-xl border border-gray-200 bg-white p-3 focus-within:border-[#09B1BA]">
-                <label className="block text-xs font-normal text-gray-500">Заголовок для Vinted</label>
-                <input
-                  {...register('vintedTitle')}
-                  type="text"
-                  placeholder="Залиште порожнім, щоб використати заголовок вище"
-                  className="w-full text-sm font-semibold text-gray-900 placeholder:text-gray-300 focus:outline-none bg-transparent mt-0.5"
-                />
-              </div>
-
-              {/* Vinted Description */}
-              <div className="rounded-xl border border-gray-200 bg-white p-3 focus-within:border-[#09B1BA]">
-                <label className="block text-xs font-normal text-gray-500">Опис для Vinted</label>
-                <textarea
-                  {...register('vintedDescription')}
-                  rows={3}
-                  placeholder="Залиште порожнім, щоб використати опис вище"
-                  className="w-full text-sm font-normal text-gray-900 placeholder:text-gray-300 focus:outline-none bg-transparent mt-0.5"
-                />
-              </div>
-
-              {/* Vinted Price */}
-              <div className="rounded-xl border border-gray-200 bg-white p-3 focus-within:border-[#09B1BA]">
-                <label className="block text-xs font-normal text-gray-500">Ціна для Vinted (€)</label>
-                <input
-                  {...register('vintedPrice')}
-                  type="number"
-                  step="0.01"
-                  placeholder="Залиште порожнім для основної ціни"
-                  className="w-full text-sm font-semibold text-gray-900 placeholder:text-gray-300 focus:outline-none bg-transparent mt-0.5"
-                />
-              </div>
+            {/* Vinted Category */}
+            <div className="rounded-xl border border-gray-200 bg-white p-3 focus-within:border-[#09B1BA]">
+              <label className="block text-xs font-normal text-gray-500">Категорія Vinted (наприклад: Mujer, Hombre, Niños, Hogar)</label>
+              <input
+                {...register('vintedCategory')}
+                type="text"
+                placeholder="Залиште порожнім, щоб використати основну"
+                className="w-full text-sm font-semibold text-gray-900 placeholder:text-gray-300 focus:outline-none bg-transparent mt-0.5"
+              />
             </div>
-          )}
 
-          {showExtraFields && (
-            <div className="space-y-3.5 pt-1">
-              {/* Modelo */}
-              <div className="rounded-2xl border border-gray-200 p-4 bg-white focus-within:border-[#00C9A7]">
-                <label className="block text-xs font-normal text-gray-500">Modelo (Opcional)</label>
-                <input
-                  {...register('model')}
-                  type="text"
-                  placeholder="Ej: CB650R, Pro Max"
-                  className="w-full text-base font-semibold text-gray-900 placeholder:text-gray-300 focus:outline-none bg-transparent mt-0.5"
-                />
-              </div>
-
-              {/* Año */}
-              <div className="rounded-2xl border border-gray-200 p-4 bg-white focus-within:border-[#00C9A7]">
-                <label className="block text-xs font-normal text-gray-500">Año (Opcional)</label>
-                <input
-                  {...register('year')}
-                  type="number"
-                  placeholder="Ej: 2023"
-                  className="w-full text-base font-semibold text-gray-900 placeholder:text-gray-300 focus:outline-none bg-transparent mt-0.5"
-                />
-              </div>
-
-              {/* Estilo */}
-              <div className="relative rounded-2xl border border-gray-200 p-4 bg-white focus-within:border-[#00C9A7]">
-                <label className="block text-xs font-normal text-gray-500">Estilo / Tipo (Opcional)</label>
-                <select
-                  {...register('style')}
-                  className="w-full text-base font-semibold text-gray-900 bg-transparent focus:outline-none cursor-pointer mt-0.5 appearance-none pr-8"
-                >
-                  <option value="">No especificado</option>
-                  {styleOptions.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown size={18} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-gray-400" />
-              </div>
-
-              {/* Material */}
-              <div className="rounded-2xl border border-gray-200 p-4 bg-white focus-within:border-[#00C9A7]">
-                <label className="block text-xs font-normal text-gray-500">Material (Opcional)</label>
-                <input
-                  {...register('material')}
-                  type="text"
-                  placeholder="Ej: Aluminio, Cuero, Madera"
-                  className="w-full text-base font-semibold text-gray-900 placeholder:text-gray-300 focus:outline-none bg-transparent mt-0.5"
-                />
-              </div>
-
-              {/* Ubicación */}
-              <div className="rounded-2xl border border-gray-200 p-4 bg-white focus-within:border-[#00C9A7]">
-                <label className="block text-xs font-normal text-gray-500">Ubicación / Código Postal (Opcional)</label>
-                <input
-                  {...register('location')}
-                  type="text"
-                  placeholder="Ej: Madrid, 28001"
-                  className="w-full text-base font-semibold text-gray-900 placeholder:text-gray-300 focus:outline-none bg-transparent mt-0.5"
-                />
-              </div>
+            {/* Vinted Size */}
+            <div className="rounded-xl border border-gray-200 bg-white p-3 focus-within:border-[#09B1BA]">
+              <label className="block text-xs font-normal text-gray-500">Розмір / Talla (XS, S, M, L, XL, 42...)</label>
+              <input
+                {...register('vintedSize')}
+                type="text"
+                placeholder="Вкажіть розмір для одягу або взуття"
+                className="w-full text-sm font-semibold text-gray-900 placeholder:text-gray-300 focus:outline-none bg-transparent mt-0.5"
+              />
             </div>
-          )}
+
+            {/* Vinted Title */}
+            <div className="rounded-xl border border-gray-200 bg-white p-3 focus-within:border-[#09B1BA]">
+              <label className="block text-xs font-normal text-gray-500">Заголовок для Vinted</label>
+              <input
+                {...register('vintedTitle')}
+                type="text"
+                placeholder="Залиште порожнім, щоб використати заголовок вище"
+                className="w-full text-sm font-semibold text-gray-900 placeholder:text-gray-300 focus:outline-none bg-transparent mt-0.5"
+              />
+            </div>
+
+            {/* Vinted Description */}
+            <div className="rounded-xl border border-gray-200 bg-white p-3 focus-within:border-[#09B1BA]">
+              <label className="block text-xs font-normal text-gray-500">Опис для Vinted</label>
+              <textarea
+                {...register('vintedDescription')}
+                rows={3}
+                placeholder="Залиште порожнім, щоб використати опис вище"
+                className="w-full text-sm font-normal text-gray-900 placeholder:text-gray-300 focus:outline-none bg-transparent mt-0.5"
+              />
+            </div>
+
+            {/* Vinted Price */}
+            <div className="rounded-xl border border-gray-200 bg-white p-3 focus-within:border-[#09B1BA]">
+              <label className="block text-xs font-normal text-gray-500">Ціна для Vinted (€)</label>
+              <input
+                {...register('vintedPrice')}
+                type="number"
+                step="0.01"
+                placeholder="Залиште порожнім для основної ціни"
+                className="w-full text-sm font-semibold text-gray-900 placeholder:text-gray-300 focus:outline-none bg-transparent mt-0.5"
+              />
+            </div>
+          </div>
+
+          <div className={cn('space-y-3.5 pt-1', !showExtraFields && 'hidden')}>
+            {/* Modelo */}
+            <div className="rounded-2xl border border-gray-200 p-4 bg-white focus-within:border-[#00C9A7]">
+              <label className="block text-xs font-normal text-gray-500">Modelo (Opcional)</label>
+              <input
+                {...register('model')}
+                type="text"
+                placeholder="Ej: CB650R, Pro Max"
+                className="w-full text-base font-semibold text-gray-900 placeholder:text-gray-300 focus:outline-none bg-transparent mt-0.5"
+              />
+            </div>
+
+            {/* Año */}
+            <div className="rounded-2xl border border-gray-200 p-4 bg-white focus-within:border-[#00C9A7]">
+              <label className="block text-xs font-normal text-gray-500">Año (Opcional)</label>
+              <input
+                {...register('year')}
+                type="number"
+                placeholder="Ej: 2023"
+                className="w-full text-base font-semibold text-gray-900 placeholder:text-gray-300 focus:outline-none bg-transparent mt-0.5"
+              />
+            </div>
+
+            {/* Estilo */}
+            <div className="relative rounded-2xl border border-gray-200 p-4 bg-white focus-within:border-[#00C9A7]">
+              <label className="block text-xs font-normal text-gray-500">Estilo / Tipo (Opcional)</label>
+              <select
+                {...register('style')}
+                className="w-full text-base font-semibold text-gray-900 bg-transparent focus:outline-none cursor-pointer mt-0.5 appearance-none pr-8"
+              >
+                <option value="">No especificado</option>
+                {styleOptions.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown size={18} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-gray-400" />
+            </div>
+
+            {/* Material */}
+            <div className="rounded-2xl border border-gray-200 p-4 bg-white focus-within:border-[#00C9A7]">
+              <label className="block text-xs font-normal text-gray-500">Material (Opcional)</label>
+              <input
+                {...register('material')}
+                type="text"
+                placeholder="Ej: Aluminio, Cuero, Madera"
+                className="w-full text-base font-semibold text-gray-900 placeholder:text-gray-300 focus:outline-none bg-transparent mt-0.5"
+              />
+            </div>
+
+            {/* Ubicación */}
+            <div className="rounded-2xl border border-gray-200 p-4 bg-white focus-within:border-[#00C9A7]">
+              <label className="block text-xs font-normal text-gray-500">Ubicación / Código Postal (Opcional)</label>
+              <input
+                {...register('location')}
+                type="text"
+                placeholder="Ej: Madrid, 28001"
+                className="w-full text-base font-semibold text-gray-900 placeholder:text-gray-300 focus:outline-none bg-transparent mt-0.5"
+              />
+            </div>
+          </div>
         </form>
       </main>
     </div>

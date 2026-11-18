@@ -93,7 +93,9 @@ export type CreateProductData = Omit<Product, 'id' | 'wallapopId' | 'errorMessag
   status?: ProductStatus;
   publishNow?: boolean;
 };
-export type UpdateProductData = Partial<CreateProductData>;
+export type UpdateProductData = {
+  [K in keyof CreateProductData]?: CreateProductData[K] | null;
+};
 
 // ─── Products ─────────────────────────────────────────────────────────────────
 

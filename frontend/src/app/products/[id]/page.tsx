@@ -284,6 +284,47 @@ export default function ProductDetailPage() {
           ))}
         </Card>
 
+        {/* Vinted Custom Parameters (if set) */}
+        {(product.vintedCategory || product.vintedSize || product.vintedTitle || product.vintedDescription || product.vintedPrice) && (
+          <Card className="border border-[#09B1BA]/30 bg-[#09B1BA]/5">
+            <p className="text-xs font-bold uppercase tracking-wider text-[#09B1BA] mb-2">
+              Окремі параметри для Vinted
+            </p>
+            <div className="divide-y divide-[#09B1BA]/15">
+              {product.vintedCategory && (
+                <div className="flex items-center justify-between py-2 text-sm">
+                  <span className="text-gray-500">Категорія Vinted</span>
+                  <span className="font-semibold text-gray-800">{product.vintedCategory}</span>
+                </div>
+              )}
+              {product.vintedSize && (
+                <div className="flex items-center justify-between py-2 text-sm">
+                  <span className="text-gray-500">Розмір Vinted</span>
+                  <span className="font-semibold text-gray-800">{product.vintedSize}</span>
+                </div>
+              )}
+              {product.vintedPrice !== undefined && product.vintedPrice !== null && (
+                <div className="flex items-center justify-between py-2 text-sm">
+                  <span className="text-gray-500">Ціна Vinted</span>
+                  <span className="font-semibold text-[#09B1BA]">€{product.vintedPrice}</span>
+                </div>
+              )}
+              {product.vintedTitle && (
+                <div className="py-2 text-sm">
+                  <span className="text-xs text-gray-500 block mb-0.5">Заголовок Vinted</span>
+                  <span className="font-semibold text-gray-800">{product.vintedTitle}</span>
+                </div>
+              )}
+              {product.vintedDescription && (
+                <div className="py-2 text-sm">
+                  <span className="text-xs text-gray-500 block mb-0.5">Опис Vinted</span>
+                  <span className="text-gray-700 whitespace-pre-wrap">{product.vintedDescription}</span>
+                </div>
+              )}
+            </div>
+          </Card>
+        )}
+
         {/* Error */}
         {product.status === 'error' && product.errorMessage && !/revisa la informaci|hemos rellenado/i.test(product.errorMessage) && (
           <div className="flex gap-2 rounded-xl bg-red-50 p-3 text-red-600">
