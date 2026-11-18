@@ -105,7 +105,9 @@ export async function getProducts(): Promise<Product[]> {
 }
 
 export async function getProduct(id: string): Promise<Product> {
-  const { data } = await api.get<Product>(`/products/${id}`);
+  const { data } = await api.get<Product>(`/products/${id}`, {
+    params: { _t: Date.now() },
+  });
   return data;
 }
 

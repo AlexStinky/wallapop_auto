@@ -42,30 +42,33 @@ const upload = multer({
 
 // ─── Validation Schemas ───────────────────────────────────────────────────────
 
+const emptyStringToNull = <T extends z.ZodTypeAny>(schema: T) =>
+  z.preprocess((val) => (val === '' || (typeof val === 'string' && val.trim() === '') ? null : val), schema);
+
 const createProductSchema = z.object({
   title: z.string().min(1).max(60),
   description: z.string().min(1).max(2000),
   price: z.number().positive(),
-  category: z.string().optional().default('auto'),
-  subcategory: z.string().nullable().optional(),
+  category: z.preprocess((val) => (val === '' || val === null || val === undefined ? 'auto' : String(val).trim()), z.string().default('auto')),
+  subcategory: emptyStringToNull(z.string().nullable().optional()),
   condition: z.string().min(1),
-  brand: z.string().nullable().optional(),
-  model: z.string().nullable().optional(),
-  year: z.number().int().nullable().optional(),
-  style: z.string().nullable().optional(),
-  material: z.string().nullable().optional(),
-  location: z.string().nullable().optional(),
-  color: z.string().nullable().optional(),
-  weight: z.string().nullable().optional(),
+  brand: emptyStringToNull(z.string().nullable().optional()),
+  model: emptyStringToNull(z.string().nullable().optional()),
+  year: emptyStringToNull(z.number().int().nullable().optional()),
+  style: emptyStringToNull(z.string().nullable().optional()),
+  material: emptyStringToNull(z.string().nullable().optional()),
+  location: emptyStringToNull(z.string().nullable().optional()),
+  color: emptyStringToNull(z.string().nullable().optional()),
+  weight: emptyStringToNull(z.string().nullable().optional()),
   quantity: z.number().int().positive().default(1),
   images: z.array(z.string()).default([]),
   publishToWallapop: z.boolean().default(true),
   publishToVinted: z.boolean().default(true),
-  vintedCategory: z.string().nullable().optional(),
-  vintedSize: z.string().nullable().optional(),
-  vintedTitle: z.string().nullable().optional(),
-  vintedDescription: z.string().nullable().optional(),
-  vintedPrice: z.number().positive().nullable().optional(),
+  vintedCategory: emptyStringToNull(z.string().nullable().optional()),
+  vintedSize: emptyStringToNull(z.string().nullable().optional()),
+  vintedTitle: emptyStringToNull(z.string().nullable().optional()),
+  vintedDescription: emptyStringToNull(z.string().nullable().optional()),
+  vintedPrice: emptyStringToNull(z.number().positive().nullable().optional()),
 });
 
 const updateProductSchema = createProductSchema.partial();

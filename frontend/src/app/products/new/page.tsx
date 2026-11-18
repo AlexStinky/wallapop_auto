@@ -196,7 +196,7 @@ export default function NewProductPage() {
         title: values.title,
         description: values.description,
         price: values.price,
-        category: values.category?.trim() || values.title.trim().slice(0, 50),
+        category: values.category?.trim() || 'auto',
         subcategory: values.subcategory?.trim() || undefined,
         condition: values.condition,
         brand: values.brand?.trim() || undefined,

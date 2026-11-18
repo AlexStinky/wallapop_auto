@@ -263,7 +263,7 @@ export default function EditProductPage() {
         title: values.title.trim(),
         description: values.description.trim(),
         price: values.price,
-        category: values.category?.trim() || values.title.trim().slice(0, 50),
+        category: values.category?.trim() || 'auto',
         subcategory: values.subcategory?.trim() || null,
         condition: values.condition,
         brand: values.brand?.trim() || null,
@@ -286,6 +286,7 @@ export default function EditProductPage() {
       });
 
       toast.success('Зміни успішно збережено!');
+      router.refresh();
       router.push(`/products/${id}`);
     } catch (err: any) {
       const errMsg = err?.response?.data?.error?.message || err?.response?.data?.message || err?.message || 'Помилка при збереженні змін';
