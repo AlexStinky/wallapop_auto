@@ -632,57 +632,151 @@ class VintedBrowserService {
         if (!this.page)
             return;
         try {
-            const categoryTrigger = await this.page.$('button[data-testid="catalog-select-dropdown-input"], #category, input[name="category"]');
-            if (categoryTrigger) {
-                await categoryTrigger.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => null);
-                await categoryTrigger.click();
-                await this.page.waitForTimeout(800);
-                // Идем в глубь дерева категорий внутри [data-testid="catalog-select-dropdown-content"]
-                // пока не кликнем конечный радио-пункт div[role="radio"]
-                for (let step = 0; step < 4; step++) {
-                    // Проверяем, есть ли радио-кнопки (конечный уровень категории)
-                    const radioOptions = await this.page.$$('[data-testid="catalog-select-dropdown-content"] div[role="radio"]');
-                    if (radioOptions.length > 0) {
-                        // Если есть конкретный matching по подкатегории/категории
-                        let chosen = radioOptions[0];
-                        const search = (subcategoryName || categoryName || '').toLowerCase().trim();
-                        if (search) {
-                            for (const r of radioOptions) {
-                                const text = (await r.innerText()).toLowerCase();
-                                if (text.includes(search)) {
-                                    chosen = r;
-                                    break;
-                                }
-                            }
-                        }
-                        console.log('[VintedPublish] Selecting final leaf category radio: %s', await chosen.innerText());
-                        await chosen.click();
-                        await this.page.waitForTimeout(1000);
-                        return;
-                    }
-                    // Если мы еще на промежуточном уровне (ветки с шевронами div[role="button"])
-                    const buttons = await this.page.$$('[data-testid="catalog-select-dropdown-content"] div[role="button"]');
-                    if (buttons.length === 0)
-                        break;
-                    let targetBtn = buttons[0];
-                    const query = (step === 0 ? (categoryName || 'Hogar') : (subcategoryName || '')).toLowerCase().trim();
-                    if (query) {
-                        for (const b of buttons) {
-                            const text = (await b.innerText()).toLowerCase();
-                            if (text.includes(query)) {
-                                targetBtn = b;
+            // 1. Проверяем, появились ли готовые рекомендации категорий (chips) на основе названия и фото
+            await this.page.waitForTimeout(600);
+            const suggestionChips = await this.page.$$('button[data-testid*="catalog-suggestion"], button[data-testid*="category-suggestion"], [data-testid*="suggestion"] button');
+            if (suggestionChips.length > 0) {
+                console.log('[VintedPublish] Found %d category suggestion chips, clicking first...', suggestionChips.length);
+                await suggestionChips[0].evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => null);
+                await suggestionChips[0].click();
+                await this.page.waitForTimeout(1000);
+                const checkTrigger = await this.page.$('button[data-testid="catalog-select-dropdown-input"], #category, [data-testid*="catalog-select"]');
+                const txt = checkTrigger ? (await checkTrigger.innerText().catch(() => '')) : '';
+                if (txt && !txt.includes('Elige') && !txt.includes('subcategoría')) {
+                    console.log('[VintedPublish] Category set via suggestion chip: "%s"', txt.trim());
+                    return;
+                }
+            }
+            // 2. Открываем селектор категории
+            const categoryTrigger = await this.page.$('button[data-testid="catalog-select-dropdown-input"], button[data-testid*="catalog"], #category, input[name="category"], [data-testid*="catalog-select-dropdown"]');
+            if (!categoryTrigger)
+                return;
+            await categoryTrigger.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => null);
+            await categoryTrigger.click();
+            await this.page.waitForTimeout(800);
+            const containerSelector = '[data-radix-popper-content-wrapper], [data-testid="catalog-select-dropdown-content"], [data-testid*="catalog-select"], div[role="dialog"]';
+            // 3. Спускаемся вглубь дерева категорий до конечной подкатегории (до 7 уровней)
+            for (let step = 0; step < 7; step++) {
+                // Проверяем, есть ли радио-кнопки (конечный уровень подкатегории)
+                const radioOptions = await this.page.$$(`${containerSelector} div[role="radio"], ${containerSelector} button[role="radio"], ${containerSelector} [role="menuitemradio"], ${containerSelector} input[type="radio"]`);
+                if (radioOptions.length > 0) {
+                    let chosen = radioOptions[0];
+                    const search = (subcategoryName || categoryName || '').toLowerCase().trim();
+                    let matched = false;
+                    if (search) {
+                        for (const r of radioOptions) {
+                            const text = (await r.innerText()).toLowerCase();
+                            if (text.includes(search)) {
+                                chosen = r;
+                                matched = true;
                                 break;
                             }
                         }
                     }
-                    console.log('[VintedPublish] Category step %d: clicking %s', step, await targetBtn.innerText());
-                    await targetBtn.click();
+                    // Если точного совпадения нет — ищем пункт "Otros" / "Otras" (прочее / другие)
+                    if (!matched) {
+                        for (const r of radioOptions) {
+                            const text = (await r.innerText()).toLowerCase();
+                            if (text.includes('otro') || text.includes('otra') || text.includes('general')) {
+                                chosen = r;
+                                matched = true;
+                                break;
+                            }
+                        }
+                    }
+                    console.log('[VintedPublish] Selecting final leaf subcategory: "%s"', (await chosen.innerText()).trim());
+                    await chosen.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => null);
+                    await chosen.click();
+                    await this.page.waitForTimeout(1000);
+                    return;
+                }
+                // Промежуточные уровни (кнопки с шевронами)
+                const buttons = await this.page.$$(`${containerSelector} div[role="button"], ${containerSelector} button[role="menuitem"], ${containerSelector} [role="menuitem"], ${containerSelector} button`);
+                if (buttons.length === 0)
+                    break;
+                // Фильтруем кнопки назад ("Atrás", "Volver", "Back")
+                const validBranches = [];
+                for (const b of buttons) {
+                    const text = (await b.innerText()).toLowerCase().trim();
+                    if (!text || text === 'atrás' || text === 'volver' || text === 'back' || text.startsWith('atras')) {
+                        continue;
+                    }
+                    validBranches.push({ el: b, text });
+                }
+                if (validBranches.length === 0)
+                    break;
+                let targetBtn = validBranches[0].el;
+                let targetText = validBranches[0].text;
+                if (step === 0) {
+                    // Корневой уровень каталога Vinted: Mujeres, Hombres, Niños, Hogar, Entretenimiento, Mascotas
+                    const catLow = (categoryName || '').toLowerCase();
+                    let preferredRoot = 'hogar';
+                    if (catLow.match(/hogar|casa|cocina|mueble|bricolaje|jard[íi]n|herramienta|v[áa]lvula|electrov[áa]lvula|cafetera|l[áa]mpara|limpieza|ba[ñn]o|decoraci/)) {
+                        preferredRoot = 'hogar';
+                    }
+                    else if (catLow.match(/electr[óo]nica|tecnolog[íi]a|m[óo]vil|consola|videojuego|ordenador|pc|audio|tele|c[áa]mara/)) {
+                        preferredRoot = 'entretenimiento';
+                    }
+                    else if (catLow.match(/mascota|perro|gato|animal/)) {
+                        preferredRoot = 'mascotas';
+                    }
+                    else if (catLow.match(/hombre|chico|caballero/)) {
+                        preferredRoot = 'hombres';
+                    }
+                    else if (catLow.match(/ni[ñn]o|beb[ée]|juguete/)) {
+                        preferredRoot = 'niños';
+                    }
+                    for (const vb of validBranches) {
+                        if (vb.text.includes(preferredRoot)) {
+                            targetBtn = vb.el;
+                            targetText = vb.text;
+                            break;
+                        }
+                    }
+                }
+                else {
+                    // Последующие уровни: ищем подходящую подкатегорию либо "Otros"
+                    const subLow = (subcategoryName || categoryName || '').toLowerCase().trim();
+                    let found = false;
+                    if (subLow) {
+                        for (const vb of validBranches) {
+                            if (vb.text.includes(subLow)) {
+                                targetBtn = vb.el;
+                                targetText = vb.text;
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (!found) {
+                        // Ищем раздел "Otros" / "Otras"
+                        for (const vb of validBranches) {
+                            if (vb.text.includes('otro') || vb.text.includes('otra') || vb.text.includes('general')) {
+                                targetBtn = vb.el;
+                                targetText = vb.text;
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                console.log('[VintedPublish] Category step %d: navigating into "%s"', step, targetText);
+                await targetBtn.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => null);
+                await targetBtn.click();
+                await this.page.waitForTimeout(800);
+            }
+            // Проверяем, не осталось ли сообщение "Elige una subcategoría"
+            const afterText = await categoryTrigger.innerText().catch(() => '');
+            if (afterText.includes('Elige') || afterText.includes('subcategoría')) {
+                console.warn('[VintedPublish] Subcategory still not selected ("%s"), selecting any leaf option...', afterText.trim());
+                const anyRadio = await this.page.$(`${containerSelector} div[role="radio"], ${containerSelector} button[role="radio"], ${containerSelector} input[type="radio"]`);
+                if (anyRadio) {
+                    await anyRadio.click();
                     await this.page.waitForTimeout(800);
                 }
-                // Если выпадающее меню вдруг осталось открытым, закрываем Escape
-                await this.page.keyboard.press('Escape').catch(() => null);
-                await this.page.waitForTimeout(400);
             }
+            await this.page.keyboard.press('Escape').catch(() => null);
+            await this.page.waitForTimeout(400);
         }
         catch (e) {
             console.warn('[VintedPublish] Category selection skipped or failed:', e);
@@ -850,31 +944,211 @@ class VintedBrowserService {
             console.warn('[VintedPublish] Condition selection failed:', e);
         }
     }
+    async isElementChecked(el) {
+        if (!el)
+            return false;
+        try {
+            return await el.evaluate((node) => {
+                if (!node)
+                    return false;
+                // 1. Прямой input checkbox / radio
+                if (node instanceof HTMLInputElement) {
+                    return node.checked;
+                }
+                // 2. Атрибут aria-checked="true"
+                if (node.getAttribute('aria-checked') === 'true') {
+                    return true;
+                }
+                // 3. Дочерний input checkbox / radio с флагом checked
+                const childInput = node.querySelector ? node.querySelector('input[type="checkbox"], input[type="radio"]') : null;
+                if (childInput && childInput.checked) {
+                    return true;
+                }
+                // 4. Наличие атрибута checked
+                if (node.hasAttribute('checked') && node.getAttribute('checked') !== 'false') {
+                    return true;
+                }
+                // 5. CSS классы активного/выбранного чекбокса
+                const className = (node.className || '').toString();
+                if (/(?:^|\s|-|_)(checked|selected|active)(?:$|\s|-|_)/i.test(className) && !className.includes('not-checked')) {
+                    const role = node.getAttribute('role');
+                    if (role === 'checkbox' || role === 'radio' || role === 'menuitemcheckbox') {
+                        return true;
+                    }
+                }
+                return false;
+            });
+        }
+        catch {
+            return false;
+        }
+    }
+    async safeCheckOption(el, description = 'option') {
+        if (!el)
+            return false;
+        try {
+            const alreadyChecked = await this.isElementChecked(el);
+            if (alreadyChecked) {
+                console.log(`[VintedPublish] Option "${description}" is ALREADY checked. Keeping it (no click).`);
+                return true;
+            }
+            await el.evaluate((node) => node.scrollIntoView({ block: 'center' })).catch(() => null);
+            await el.click();
+            console.log(`[VintedPublish] Clicked to check option "${description}".`);
+            return true;
+        }
+        catch (e) {
+            console.warn(`[VintedPublish] Failed to check option "${description}":`, e);
+            return false;
+        }
+    }
     async selectSize(size) {
         if (!this.page)
             return;
         try {
-            const sizeBtn = await this.page.$('button[data-testid="category-size-single-grid-input"], #size, [data-testid="category-size-single-grid-input"]');
+            const sizeBtn = await this.page.$('button[data-testid="category-size-single-grid-input"], ' +
+                'button[data-testid="category-size-single-list-input"], ' +
+                'button[data-testid*="size-single"], ' +
+                'button[data-testid*="category-size"], ' +
+                '#size, ' +
+                '[data-testid="category-size-single-grid-input"], ' +
+                '[data-testid="category-size-single-list-input"], ' +
+                'button:has-text("Talla"), ' +
+                'button:has-text("Elige la talla"), ' +
+                'button:has-text("Medidas")');
             if (sizeBtn) {
                 await sizeBtn.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => null);
                 await sizeBtn.click();
                 await this.page.waitForTimeout(600);
+                // Если вылезла отдельная информационная подсказка / модалка о таблице размеров с кнопкой закрытия/подтверждения
+                const infoModalClose = await this.page.$('div[class*="Dialog__modal"]:has-text("Tabla de tallas") button:has-text("Entendido"), ' +
+                    'div[class*="Dialog__modal"]:has-text("Tabla de tallas") button:has-text("Aceptar"), ' +
+                    'div[class*="Dialog__modal"]:has-text("Tabla de tallas") button:has-text("De acuerdo"), ' +
+                    'div[class*="Dialog__modal"]:has-text("Tabla de tallas") [data-testid="modal-close"]');
+                if (infoModalClose) {
+                    await infoModalClose.click().catch(() => null);
+                    await this.page.waitForTimeout(400);
+                }
+                const containerSelectors = [
+                    'div[class*="dropdown__content"]',
+                    '[data-radix-popper-content-wrapper]',
+                    'div[role="dialog"]',
+                    'div[class*="Dialog__modal"]',
+                    'div[class*="Sheet"]',
+                    'div[class*="flat"]'
+                ];
                 let selected = false;
-                if (size && size.trim()) {
-                    const sizeOption = await this.page.$(`[data-radix-popper-content-wrapper] :has-text("${size.trim()}")`);
-                    if (sizeOption) {
-                        await sizeOption.click();
+                const sizeQuery = (size || '').trim().toLowerCase();
+                // 0. Проверяем: если на сайте УЖЕ проставлен нужный чекбокс и у пользователя нет особого требования к размеру — не трогаем!
+                if (!sizeQuery) {
+                    const alreadyCheckedSize = await this.page.$('div[class*="dropdown__content"] [role="checkbox"][aria-checked="true"], ' +
+                        'div[class*="dropdown__content"] [role="radio"][aria-checked="true"], ' +
+                        '[data-radix-popper-content-wrapper] [role="checkbox"][aria-checked="true"], ' +
+                        '[data-radix-popper-content-wrapper] [role="radio"][aria-checked="true"], ' +
+                        'div[role="checkbox"][aria-checked="true"]');
+                    if (alreadyCheckedSize) {
+                        const checkedText = ((await alreadyCheckedSize.getAttribute('aria-label').catch(() => '')) ||
+                            (await alreadyCheckedSize.innerText().catch(() => ''))).trim();
+                        console.log('[VintedPublish] Size is ALREADY checked on page ("%s"). Preserving it (not unchecking).', checkedText);
                         selected = true;
                     }
                 }
-                // Если нет в списке — берем первый доступный пункт
-                if (!selected) {
-                    const firstOption = await this.page.$('[data-radix-popper-content-wrapper] div[role="menuitem"], [data-radix-popper-content-wrapper] [role="option"], [data-radix-popper-content-wrapper] button');
-                    if (firstOption) {
-                        await firstOption.click();
+                // 1. Если указан конкретный размер, ищем совпадение по aria-label или тексту
+                if (sizeQuery && !selected) {
+                    const directMatch = await this.page.$(`[role="checkbox"][aria-label*="${sizeQuery}" i], ` +
+                        `div[role="radio"][aria-label*="${sizeQuery}" i], ` +
+                        `[data-testid*="grid-option"][aria-label*="${sizeQuery}" i], ` +
+                        `div[class*="dropdown__content"] [role="checkbox"]:has-text("${sizeQuery}"), ` +
+                        `[data-radix-popper-content-wrapper] :has-text("${sizeQuery}")`);
+                    if (directMatch) {
+                        await this.safeCheckOption(directMatch, `size ${sizeQuery}`);
+                        selected = true;
+                        console.log('[VintedPublish] Size selected via direct match: "%s"', sizeQuery);
                     }
                 }
+                // 2. Если размер не указан или не найден — сначала проверяем прямой селектор "Otra" / "Otro"
+                if (!selected) {
+                    const otraDirect = await this.page.$('div[role="checkbox"][aria-label="Otra"], ' +
+                        '[aria-label="Otra"], ' +
+                        'div[role="checkbox"][aria-label="Otro"], ' +
+                        '[aria-label="Otro"], ' +
+                        '[data-testid*="grid-option"][aria-label="Otra"], ' +
+                        '[data-testid*="grid-option"][aria-label="Otro"], ' +
+                        'div[class*="dropdown__content"] [role="checkbox"]:has-text("Otra"), ' +
+                        'div[class*="dropdown__content"] [role="checkbox"]:has-text("Otro")');
+                    if (otraDirect) {
+                        await this.safeCheckOption(otraDirect, 'Otra / Otro');
+                        selected = true;
+                        console.log('[VintedPublish] Selected "Otra" / "Otro" via direct aria-label');
+                    }
+                }
+                // 3. Если еще не выбран — проходим по всем доступным опциям в контейнерах
+                if (!selected) {
+                    console.log('[VintedPublish] Size "%s" not found via direct selector, searching containers...', sizeQuery);
+                    for (const cSel of containerSelectors) {
+                        const options = await this.page.$$(`${cSel} div[role="checkbox"], ${cSel} [role="checkbox"], ${cSel} div[role="radio"], ${cSel} button[role="radio"], ${cSel} div[role="menuitem"], ${cSel} [role="option"], ${cSel} button`);
+                        if (options.length === 0)
+                            continue;
+                        // Приоритетно "Otra" / "Otro"
+                        for (const opt of options) {
+                            const text = ((await opt.getAttribute('aria-label').catch(() => '')) ||
+                                (await opt.innerText().catch(() => ''))).toLowerCase().trim();
+                            if (/\botra(s)?\b/i.test(text) || /\botro(s)?\b/i.test(text)) {
+                                await this.safeCheckOption(opt, text);
+                                selected = true;
+                                console.log('[VintedPublish] Selected size option from container: "%s"', text);
+                                break;
+                            }
+                        }
+                        if (selected)
+                            break;
+                        // Затем "Talla única" / "Única" / "Sin talla" / "Universal"
+                        for (const opt of options) {
+                            const text = ((await opt.getAttribute('aria-label').catch(() => '')) ||
+                                (await opt.innerText().catch(() => ''))).toLowerCase().trim();
+                            if (text.includes('única') || text.includes('unica') || text.includes('sin talla') || text.includes('universal')) {
+                                await this.safeCheckOption(opt, text);
+                                selected = true;
+                                console.log('[VintedPublish] Selected size fallback option: "%s"', text);
+                                break;
+                            }
+                        }
+                        if (selected)
+                            break;
+                        // Если ничего из вышеперечисленного нет, выбираем первый интерактивный пункт размера (пропуская заголовки и подсказки)
+                        for (const opt of options) {
+                            const text = ((await opt.getAttribute('aria-label').catch(() => '')) ||
+                                (await opt.innerText().catch(() => ''))).toLowerCase().trim();
+                            if (!text ||
+                                text.includes('tabla de tallas') ||
+                                text.includes('siguientes tallas') ||
+                                text.includes('mide el largo') ||
+                                text.includes('elige la talla') ||
+                                text.includes('guía de tallas') ||
+                                text.includes('atrás') ||
+                                text.includes('volver')) {
+                                continue;
+                            }
+                            await this.safeCheckOption(opt, text);
+                            selected = true;
+                            console.log('[VintedPublish] Selected first available size option: "%s"', text);
+                            break;
+                        }
+                        if (selected)
+                            break;
+                    }
+                }
+                // Если внизу диалога есть кнопка подтверждения ("Aceptar" / "Guardar" / "Aplicar")
+                const confirmBtn = await this.page.$('div[class*="Dialog__modal"] button:has-text("Aceptar"), ' +
+                    'div[class*="Dialog__modal"] button:has-text("Guardar"), ' +
+                    'div[class*="Dialog__modal"] button:has-text("Aplicar"), ' +
+                    'div[role="dialog"] button:has-text("Aceptar"), ' +
+                    'div[role="dialog"] button:has-text("Guardar")');
+                if (confirmBtn) {
+                    await confirmBtn.click().catch(() => null);
+                }
                 await this.page.waitForTimeout(500);
+                await this.page.keyboard.press('Escape').catch(() => null);
             }
         }
         catch (e) {
@@ -891,18 +1165,29 @@ class VintedBrowserService {
                 await colorBtn.click();
                 await this.page.waitForTimeout(600);
                 let selected = false;
-                if (color && color.trim()) {
-                    const colorOption = await this.page.$(`[data-radix-popper-content-wrapper] [role="checkbox"]:has-text("${color.trim()}"), [data-radix-popper-content-wrapper] button:has-text("${color.trim()}")`);
+                const colorQuery = (color || '').trim().toLowerCase();
+                // 0. Проверяем: если Vinted уже сам выбрал цвет (чекбокс стоит)
+                const alreadyCheckedColor = await this.page.$('[data-radix-popper-content-wrapper] [role="checkbox"][aria-checked="true"], ' +
+                    '[data-radix-popper-content-wrapper] input[type="checkbox"]:checked, ' +
+                    '[data-radix-popper-content-wrapper] [aria-checked="true"]');
+                if (alreadyCheckedColor && !colorQuery) {
+                    const checkedText = ((await alreadyCheckedColor.getAttribute('aria-label').catch(() => '')) ||
+                        (await alreadyCheckedColor.innerText().catch(() => ''))).trim();
+                    console.log('[VintedPublish] Color is ALREADY checked by Vinted ("%s"). Preserving it (not unchecking).', checkedText);
+                    selected = true;
+                }
+                if (colorQuery && !selected) {
+                    const colorOption = await this.page.$(`[data-radix-popper-content-wrapper] [role="checkbox"]:has-text("${colorQuery}"), [data-radix-popper-content-wrapper] button:has-text("${colorQuery}")`);
                     if (colorOption) {
-                        await colorOption.click();
+                        await this.safeCheckOption(colorOption, colorQuery);
                         selected = true;
                     }
                 }
-                // Если нет — берем первый
-                if (!selected) {
+                // Если цвет не задан и никакой цвет еще не выбран — берем первый
+                if (!selected && !alreadyCheckedColor) {
                     const firstOption = await this.page.$('[data-radix-popper-content-wrapper] [role="checkbox"], [data-radix-popper-content-wrapper] div[role="radio"], [data-radix-popper-content-wrapper] button');
                     if (firstOption) {
-                        await firstOption.click();
+                        await this.safeCheckOption(firstOption, 'first color');
                     }
                 }
                 await this.page.waitForTimeout(500);
@@ -923,17 +1208,28 @@ class VintedBrowserService {
                 await matBtn.click();
                 await this.page.waitForTimeout(600);
                 let selected = false;
-                if (material && material.trim()) {
-                    const matOption = await this.page.$(`[data-radix-popper-content-wrapper] :has-text("${material.trim()}")`);
+                const matQuery = (material || '').trim().toLowerCase();
+                // 0. Проверяем: если материал уже выбран на сайте (чекбокс стоит)
+                const alreadyCheckedMat = await this.page.$('[data-radix-popper-content-wrapper] [role="checkbox"][aria-checked="true"], ' +
+                    '[data-radix-popper-content-wrapper] input[type="checkbox"]:checked, ' +
+                    '[data-radix-popper-content-wrapper] [aria-checked="true"]');
+                if (alreadyCheckedMat && !matQuery) {
+                    const checkedText = ((await alreadyCheckedMat.getAttribute('aria-label').catch(() => '')) ||
+                        (await alreadyCheckedMat.innerText().catch(() => ''))).trim();
+                    console.log('[VintedPublish] Material is ALREADY checked by Vinted ("%s"). Preserving it (not unchecking).', checkedText);
+                    selected = true;
+                }
+                if (matQuery && !selected) {
+                    const matOption = await this.page.$(`[data-radix-popper-content-wrapper] :has-text("${matQuery}")`);
                     if (matOption) {
-                        await matOption.click();
+                        await this.safeCheckOption(matOption, matQuery);
                         selected = true;
                     }
                 }
-                if (!selected) {
+                if (!selected && !alreadyCheckedMat) {
                     const firstOption = await this.page.$('[data-radix-popper-content-wrapper] [role="checkbox"], [data-radix-popper-content-wrapper] div[role="menuitem"], [data-radix-popper-content-wrapper] button');
                     if (firstOption) {
-                        await firstOption.click();
+                        await this.safeCheckOption(firstOption, 'first material');
                     }
                 }
                 await this.page.waitForTimeout(500);
@@ -958,10 +1254,19 @@ class VintedBrowserService {
                     await btn.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => null);
                     await btn.click();
                     await this.page.waitForTimeout(600);
+                    // Проверяем, не выбран ли уже какой-то чекбокс внутри
+                    const alreadyChecked = await this.page.$('[data-radix-popper-content-wrapper] [role="checkbox"][aria-checked="true"], ' +
+                        '[data-radix-popper-content-wrapper] [role="radio"][aria-checked="true"], ' +
+                        '[data-radix-popper-content-wrapper] input:checked');
+                    if (alreadyChecked) {
+                        console.log('[VintedPublish] Dynamic field already has option checked, keeping it.');
+                        await this.page.keyboard.press('Escape').catch(() => null);
+                        continue;
+                    }
                     // Берем первый доступный вариант в открывшемся поповере
                     const option = await this.page.$('[data-radix-popper-content-wrapper] div[role="menuitem"], [data-radix-popper-content-wrapper] [role="option"], [data-radix-popper-content-wrapper] [role="checkbox"], [data-radix-popper-content-wrapper] button, [data-radix-popper-content-wrapper] div[role="radio"]');
                     if (option) {
-                        await option.click();
+                        await this.safeCheckOption(option, 'dynamic field option');
                         await this.page.waitForTimeout(400);
                     }
                     else {
