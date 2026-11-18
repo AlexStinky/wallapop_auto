@@ -126,6 +126,11 @@ export async function publishProduct(id: string, platform?: 'wallapop' | 'vinted
   return data;
 }
 
+export async function addProductToQueue(id: string): Promise<{ message: string; productId: string }> {
+  const { data } = await api.post<{ message: string; productId: string }>(`/products/${id}/queue`);
+  return data;
+}
+
 export async function publishProductNow(id: string, platform?: 'wallapop' | 'vinted' | 'both'): Promise<{ message: string; productId: string }> {
   const { data } = await api.post<{ message: string; productId: string }>(`/products/${id}/publish-now`, { platform });
   return data;

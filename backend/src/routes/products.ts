@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
 import prisma from '../db/prisma';
 import { queueService } from '../services/queue.service';
+import { vintedQueueService } from '../services/vinted-queue.service';
 import { createError } from '../middleware/error';
 
 const router = Router();
@@ -146,12 +147,23 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
     });
 
     if (isPublishNow) {
-      // Публікація ТІЛЬКИ цього товару одразу, БЕЗ черги
-      queueService.publishDirectly(product.id).catch((err) => {
-        console.error('[PublishDirectly] Failed to publish product %s directly:', product.id, err);
-      });
+      if (data.publishToVinted) {
+        vintedQueueService.enqueue(product.id).catch((err) => {
+          console.error('[VintedQueue] Failed to enqueue product %s:', product.id, err);
+        });
+      }
+      if (data.publishToWallapop) {
+        queueService.publishDirectly(product.id, 'wallapop').catch((err) => {
+          console.error('[PublishDirectly] Failed to publish Wallapop product %s directly:', product.id, err);
+        });
+      }
     } else if (initialStatus === 'in_queue') {
-      await queueService.addToQueue(product.id);
+      if (data.publishToVinted) {
+        await vintedQueueService.enqueue(product.id);
+      }
+      if (data.publishToWallapop) {
+        await queueService.addToQueue(product.id);
+      }
     }
 
     res.status(201).json({ ...product, images: safeParseJson(product.images, []) });
@@ -226,20 +238,62 @@ router.delete('/:id', async (req: Request, res: Response, next: NextFunction) =>
 // POST /api/products/publish-all → add all pending/in_queue products to queue and start
 router.post('/publish-all', async (_req: Request, res: Response, next: NextFunction) => {
   try {
-    const count = await queueService.loadPendingFromDb();
-    if (count === 0) {
+    const pendingProducts = await prisma.product.findMany({
+      where: {
+        OR: [{ status: 'pending' }, { status: 'in_queue' }, { status: 'error' }],
+        NOT: { status: 'published' },
+      },
+    });
+
+    if (pendingProducts.length === 0) {
       throw createError('Немає очікуючих товарів для публікації', 400);
     }
-    queueService.startProcessing().catch((err) => {
-      console.error('[PublishAll] Failed to start queue processing loop:', err);
+
+    const vintedIds: string[] = [];
+    for (const p of pendingProducts) {
+      if (p.publishToVinted && p.vintedStatus !== 'published') {
+        vintedIds.push(p.id);
+      }
+    }
+
+    if (vintedIds.length > 0) {
+      await vintedQueueService.enqueueMany(vintedIds);
+    }
+
+    const wallapopCount = await queueService.loadPendingFromDb();
+    if (wallapopCount > 0) {
+      queueService.startProcessing().catch((err) => {
+        console.error('[PublishAll] Failed to start Wallapop queue processing loop:', err);
+      });
+    }
+
+    res.json({
+      message: `Додано до черги: Wallapop (${wallapopCount}), Vinted (${vintedIds.length}, інтервал не частіше 1 хв)`,
+      count: pendingProducts.length,
     });
-    res.json({ message: `Додано ${count} товарів до черги`, queueState: queueService.getState() });
   } catch (err) {
     next(err);
   }
 });
 
-// POST /api/products/:id/publish → publish directly right now without delay
+// POST /api/products/:id/queue → add product to Wallapop queue (starts when user clicks "Запустити")
+router.post('/:id/queue', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const product = await prisma.product.findUnique({ where: { id: req.params.id } });
+    if (!product) throw createError('Product not found', 404);
+
+    await queueService.addToQueue(product.id);
+    res.json({
+      message: 'Товар додано до черги Wallapop. Для початку публікації натисніть "Запустити".',
+      productId: product.id,
+      queueState: queueService.getState(),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/products/:id/publish → publish (with Vinted queue rate-limiting)
 router.post('/:id/publish', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const product = await prisma.product.findUnique({ where: { id: req.params.id } });
@@ -247,18 +301,42 @@ router.post('/:id/publish', async (req: Request, res: Response, next: NextFuncti
 
     const platform = (req.body?.platform || req.query?.platform) as 'wallapop' | 'vinted' | 'both' | undefined;
 
-    queueService.publishDirectly(product.id, platform).catch((err) => {
-      console.error('[PublishDirectly] Error publishing directly:', err);
-    });
+    if (platform === 'vinted') {
+      const q = await vintedQueueService.enqueue(product.id);
+      return res.json({
+        message: `Товар додано до черги Vinted (позиція ${q.position}, очікування ~${q.estimatedWaitSeconds}с)`,
+        productId: product.id,
+        queue: q,
+      });
+    }
 
-    const targetDesc = platform === 'wallapop' ? 'на Wallapop' : platform === 'vinted' ? 'на Vinted' : 'відразу';
-    res.json({ message: `Публікацію ${targetDesc} запущено`, productId: product.id });
+    if (platform === 'wallapop') {
+      queueService.publishDirectly(product.id, 'wallapop').catch((err) => {
+        console.error('[PublishDirectly] Error publishing Wallapop directly:', err);
+      });
+      return res.json({ message: 'Публікацію на Wallapop запущено', productId: product.id });
+    }
+
+    // Both platforms
+    if (product.publishToVinted) {
+      await vintedQueueService.enqueue(product.id);
+    }
+    if (product.publishToWallapop) {
+      queueService.publishDirectly(product.id, 'wallapop').catch((err) => {
+        console.error('[PublishDirectly] Error publishing Wallapop directly:', err);
+      });
+    }
+
+    return res.json({
+      message: 'Публікацію запущено (Vinted додано до черги з інтервалом не менше 1 хв)',
+      productId: product.id,
+    });
   } catch (err) {
     next(err);
   }
 });
 
-// POST /api/products/:id/publish-now → publish directly right now without touching the queue
+// POST /api/products/:id/publish-now → publish now (Vinted always adheres to 1-min queue)
 router.post('/:id/publish-now', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const product = await prisma.product.findUnique({ where: { id: req.params.id } });
@@ -266,12 +344,36 @@ router.post('/:id/publish-now', async (req: Request, res: Response, next: NextFu
 
     const platform = (req.body?.platform || req.query?.platform) as 'wallapop' | 'vinted' | 'both' | undefined;
 
-    queueService.publishDirectly(product.id, platform).catch((err) => {
-      console.error('[PublishNow] Error publishing directly:', err);
-    });
+    if (platform === 'vinted') {
+      const q = await vintedQueueService.enqueue(product.id);
+      return res.json({
+        message: `Товар додано до черги Vinted (позиція ${q.position}, очікування ~${q.estimatedWaitSeconds}с)`,
+        productId: product.id,
+        queue: q,
+      });
+    }
 
-    const targetDesc = platform === 'wallapop' ? 'на Wallapop' : platform === 'vinted' ? 'на Vinted' : 'відразу';
-    res.json({ message: `Публікацію ${targetDesc} запущено`, productId: product.id });
+    if (platform === 'wallapop') {
+      queueService.publishDirectly(product.id, 'wallapop').catch((err) => {
+        console.error('[PublishNow] Error publishing Wallapop directly:', err);
+      });
+      return res.json({ message: 'Публікацію на Wallapop запущено', productId: product.id });
+    }
+
+    // Both platforms
+    if (product.publishToVinted) {
+      await vintedQueueService.enqueue(product.id);
+    }
+    if (product.publishToWallapop) {
+      queueService.publishDirectly(product.id, 'wallapop').catch((err) => {
+        console.error('[PublishNow] Error publishing Wallapop directly:', err);
+      });
+    }
+
+    return res.json({
+      message: 'Публікацію запущено (Vinted додано до черги з інтервалом не менше 1 хв)',
+      productId: product.id,
+    });
   } catch (err) {
     next(err);
   }

@@ -414,6 +414,19 @@ export class VintedBrowserService {
       await this.acceptCookies(this.page);
       await this.page.waitForTimeout(2000);
 
+      // Check if Vinted returned Rate Limit page
+      const isRateLimited = await this.page.evaluate(() => {
+        const text = document.body?.innerText || '';
+        return text.includes('You are rate limited') || text.includes('blocked for this computer');
+      }).catch(() => false);
+
+      if (isRateLimited) {
+        return {
+          success: false,
+          error: 'Vinted тимчасово обмежив доступ (You are rate limited: blocked due to too many requests). Зробіть паузу 15-30 хв або змініть IP.',
+        };
+      }
+
       // Disable hover and click events on sticky header so it never opens menus or intercepts clicks
       await this.page.evaluate(() => {
         const header = document.querySelector('header, .site-header, [data-testid="header"]');
@@ -459,10 +472,25 @@ export class VintedBrowserService {
             images.length < 3 ? 'all photos (less than 3)' : 'skipped first 2',
             absoluteImagePaths
           );
-          const fileInput = await this.page.waitForSelector(
-            'input[data-testid="add-photos-input"], input[name="photos"], input[type="file"][accept*="image"]',
-            { state: 'attached', timeout: 15000 }
+          let fileInput = await this.page.$(
+            'input[data-testid="add-photos-input"], input[name="photos"], input[type="file"][accept*="image"]'
           );
+          if (!fileInput) {
+            fileInput = await this.page.waitForSelector(
+              'input[data-testid="add-photos-input"], input[name="photos"], input[type="file"][accept*="image"]',
+              { state: 'attached', timeout: 25000 }
+            ).catch(async () => {
+              const criticalDialog = await this.page?.$('[data-testid*="critical-error"]');
+              if (criticalDialog) {
+                throw new Error('Vinted показав критичну помилку форми (item-upload-critical-error-dialog). Зачекайте перед повторною спробою.');
+              }
+              const currentUrl = this.page?.url() || '';
+              if (currentUrl.includes('/login') || currentUrl.includes('/auth')) {
+                throw new Error('Сесія Vinted завершилась (редирект на авторизацію).');
+              }
+              return null;
+            });
+          }
           if (fileInput) {
             await fileInput.setInputFiles(absoluteImagePaths);
             // Give time for uploads to process
@@ -500,6 +528,7 @@ export class VintedBrowserService {
 
       // 5. Brand (Marca)
       await this.selectBrand(product.brand);
+      await this.dismissAuthenticityModal();
 
       // 6. Size (Talla)
       await this.selectSize(product.vintedSize);
@@ -541,8 +570,16 @@ export class VintedBrowserService {
 
       if (submitBtn) {
         console.log('[VintedPublish] Clicking submit button...');
+        await this.dismissAuthenticityModal();
+
+        const critCheck = await this.page.$('[data-testid*="critical-error"], [data-testid="item-upload-critical-error-dialog"]');
+        if (critCheck) {
+          return { success: false, error: 'Vinted показав критичну помилку форми (item-upload-critical-error-dialog). Спрацював ліміт або потрібна пауза.' };
+        }
+
         await submitBtn.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => null);
         await this.page.waitForTimeout(500);
+        await this.dismissAuthenticityModal();
         await submitBtn.click();
 
         // Wait for redirect to item page or profile
@@ -632,6 +669,28 @@ export class VintedBrowserService {
         console.log('[VintedPublish] Saved error screenshot to %s', screenshotPath);
       } catch (_) {}
 
+      // Check if Vinted blocked with rate limit or critical dialog
+      try {
+        const isRateLimited = await this.page?.evaluate(() => {
+          const text = document.body?.innerText || '';
+          return text.includes('You are rate limited') || text.includes('blocked for this computer');
+        });
+        if (isRateLimited) {
+          return {
+            success: false,
+            error: 'Vinted заблокував доступ за забагато запитів (You are rate limited). Зробіть паузу 15-30 хв або змініть IP.',
+          };
+        }
+
+        const critDialog = await this.page?.$('[data-testid*="critical-error"]');
+        if (critDialog) {
+          return {
+            success: false,
+            error: 'Vinted показав критичну помилку форми (item-upload-critical-error-dialog). Спрацював ліміт або потрібна пауза.',
+          };
+        }
+      } catch (_) {}
+
       return { success: false, error: err.message || 'Невідома помилка публікації на Vinted' };
     }
   }
@@ -718,36 +777,145 @@ export class VintedBrowserService {
 
         let selected = false;
         const brandQuery = (brand || '').trim();
-        if (brandQuery) {
-          const searchInput = await this.page.$(
-            '[data-radix-popper-content-wrapper] input[type="search"], [data-radix-popper-content-wrapper] input[type="text"], input[placeholder*="buscar" i]'
+        const searchInput = await this.page.$(
+          '[data-radix-popper-content-wrapper] input[type="search"], [data-radix-popper-content-wrapper] input[type="text"], input[placeholder*="buscar" i]'
+        );
+
+        if (brandQuery && searchInput) {
+          await searchInput.fill(brandQuery);
+          await this.page.waitForTimeout(600);
+          const matchItem = await this.page.$(
+            `[data-radix-popper-content-wrapper] div[role="menuitem"]:has-text("${brandQuery}"), [data-radix-popper-content-wrapper] button:has-text("${brandQuery}"), [data-radix-popper-content-wrapper] div[role="radio"]:has-text("${brandQuery}")`
           );
-          if (searchInput) {
-            await searchInput.fill(brandQuery);
-            await this.page.waitForTimeout(600);
-            const matchItem = await this.page.$(
-              `[data-radix-popper-content-wrapper] div[role="menuitem"]:has-text("${brandQuery}"), [data-radix-popper-content-wrapper] button:has-text("${brandQuery}"), [data-radix-popper-content-wrapper] div[role="radio"]:has-text("${brandQuery}")`
-            );
-            if (matchItem) {
-              await matchItem.click();
-              selected = true;
-            }
+          if (matchItem) {
+            await matchItem.click();
+            selected = true;
+            console.log('[VintedPublish] Brand selected: "%s"', brandQuery);
           }
         }
 
-        // Если бренда нет в списке или не нашли — берем первый который там будет
+        // Если бренда нет в списке или не нашли — выбираем "Publicar sin marca" / "Sin marca"
         if (!selected) {
-          const firstOption = await this.page.$(
-            '[data-radix-popper-content-wrapper] div[role="menuitem"], [data-radix-popper-content-wrapper] button, [data-radix-popper-content-wrapper] div[role="radio"]'
+          console.log('[VintedPublish] Brand "%s" not found, looking for "Publicar sin marca"...', brandQuery);
+
+          // 1. Сначала проверяем, есть ли уже кнопка/опция "Publicar sin marca" прямо на экране
+          let sinMarcaBtn = await this.page.$(
+            '[data-radix-popper-content-wrapper] button:has-text("Publicar sin marca"), ' +
+            '[data-radix-popper-content-wrapper] div[role="menuitem"]:has-text("Publicar sin marca"), ' +
+            '[data-radix-popper-content-wrapper] div[role="radio"]:has-text("Publicar sin marca"), ' +
+            '[data-radix-popper-content-wrapper] div:has-text("Publicar sin marca"), ' +
+            'button:has-text("Publicar sin marca"), ' +
+            'div[role="menuitem"]:has-text("Publicar sin marca"), ' +
+            'span:has-text("Publicar sin marca"), ' +
+            'a:has-text("Publicar sin marca")'
           );
-          if (firstOption) {
-            await firstOption.click();
+
+          // 2. Если сразу нет — очищаем поиск или вводим "Sin marca"
+          if (!sinMarcaBtn && searchInput) {
+            await searchInput.fill('');
+            await searchInput.fill('Sin marca');
+            await this.page.waitForTimeout(600);
+
+            sinMarcaBtn = await this.page.$(
+              '[data-radix-popper-content-wrapper] button:has-text("Publicar sin marca"), ' +
+              '[data-radix-popper-content-wrapper] div[role="menuitem"]:has-text("Publicar sin marca"), ' +
+              '[data-radix-popper-content-wrapper] div[role="radio"]:has-text("Publicar sin marca"), ' +
+              '[data-radix-popper-content-wrapper] div:has-text("Publicar sin marca"), ' +
+              'button:has-text("Publicar sin marca"), ' +
+              'div[role="menuitem"]:has-text("Publicar sin marca"), ' +
+              'span:has-text("Publicar sin marca"), ' +
+              'a:has-text("Publicar sin marca"), ' +
+              '[data-radix-popper-content-wrapper] div[role="menuitem"]:has-text("Sin marca"), ' +
+              '[data-radix-popper-content-wrapper] button:has-text("Sin marca"), ' +
+              '[data-radix-popper-content-wrapper] div[role="radio"]:has-text("Sin marca"), ' +
+              '[data-radix-popper-content-wrapper] [role="option"]:has-text("Sin marca"), ' +
+              '[data-radix-popper-content-wrapper] span:has-text("Sin marca")'
+            );
+          }
+
+          if (sinMarcaBtn) {
+            await sinMarcaBtn.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => null);
+            await sinMarcaBtn.click();
+            selected = true;
+            console.log('[VintedPublish] Clicked "Publicar sin marca" / "Sin marca"');
+          } else {
+            // Запасные варианты на других языках
+            const fallbackOption = await this.page.$(
+              `[data-radix-popper-content-wrapper] div[role="menuitem"]:has-text("No brand"), ` +
+              `[data-radix-popper-content-wrapper] div[role="menuitem"]:has-text("Unbranded"), ` +
+              `[data-radix-popper-content-wrapper] div[role="menuitem"]:has-text("Sans marque")`
+            );
+            if (fallbackOption) {
+              await fallbackOption.click();
+              selected = true;
+              console.log('[VintedPublish] Selected fallback unbranded option');
+            } else if (searchInput) {
+              // Если ввели в поиск, проверяем первый элемент в результатах
+              const firstResult = await this.page.$(
+                '[data-radix-popper-content-wrapper] div[role="menuitem"], [data-radix-popper-content-wrapper] button, [data-radix-popper-content-wrapper] div[role="radio"]'
+              );
+              if (firstResult) {
+                const text = (await firstResult.innerText()).toLowerCase();
+                if (text.includes('marca') || text.includes('brand')) {
+                  await firstResult.click();
+                  selected = true;
+                  console.log('[VintedPublish] Selected search result for unbranded: "%s"', text.trim());
+                }
+              }
+            }
+          }
+
+          // Если так и не удалось найти "Publicar sin marca", закрываем выпадающий список (Esc), не выбирая случайный бренд
+          if (!selected) {
+            console.warn('[VintedPublish] Neither "Publicar sin marca" nor "Sin marca" found, closing brand dropdown');
+            await this.page.keyboard.press('Escape').catch(() => null);
           }
         }
+
         await this.page.waitForTimeout(500);
+        await this.dismissAuthenticityModal();
       }
     } catch (e) {
       console.warn('[VintedPublish] Brand selection failed:', e);
+    }
+  }
+
+  private async dismissAuthenticityModal(): Promise<void> {
+    if (!this.page) return;
+    try {
+      await this.page.waitForTimeout(500);
+      const modal = await this.page.$(
+        '[data-testid="authenticity-modal"], [data-testid="authenticity-modal--overlay"], div[class*="Dialog__portal"]:has-text("imitación"), div[class*="Dialog__modal"]:has-text("imitación")'
+      );
+      if (modal) {
+        console.log('[VintedPublish] Authenticity modal detected, attempting to dismiss...');
+        const confirmBtn = await this.page.$(
+          'div[class*="Dialog__portal"] button:has-text("Entendido"), ' +
+          'div[class*="Dialog__portal"] button:has-text("Aceptar"), ' +
+          'div[class*="Dialog__portal"] button:has-text("Continuar"), ' +
+          'div[class*="Dialog__portal"] button:has-text("Lo he entendido"), ' +
+          'div[class*="Dialog__portal"] button:has-text("De acuerdo"), ' +
+          '[data-testid="authenticity-modal"] button, ' +
+          '[data-testid="authenticity-modal--overlay"] button, ' +
+          'div[class*="Dialog__portal"] button[data-testid*="confirm"], ' +
+          'div[class*="Dialog__portal"] [data-testid="modal-close"]'
+        );
+
+        if (confirmBtn) {
+          await confirmBtn.click().catch(() => null);
+          console.log('[VintedPublish] Clicked confirmation on Authenticity modal');
+        } else {
+          const anyBtn = await this.page.$('div[class*="Dialog__portal"] button');
+          if (anyBtn) {
+            await anyBtn.click().catch(() => null);
+          } else {
+            await this.page.keyboard.press('Escape').catch(() => null);
+          }
+        }
+        await this.page.waitForTimeout(1000);
+      }
+    } catch (e) {
+      console.warn('[VintedPublish] Error dismissing authenticity modal:', e);
     }
   }
 
@@ -931,32 +1099,47 @@ export class VintedBrowserService {
   private async handlePackageSize(): Promise<void> {
     if (!this.page) return;
     try {
-      // Требование: размер всегда брать 5 кг (Grande y pesado / 8-package-size / или Grande)
-      const heavyCell = await this.page.$(
-        '[data-testid="8-package-size--cell"], [data-testid="8-package-size--cell--suffix"], #package-size-8, label[for="package_type_selector_8"], [data-testid="package_type_selector_8"]'
+      // Требование: всегда выбирать рекомендованный / маленький размер (Pequeño / Recomendado)
+      // 1. Проверяем вариант с бейджем Recomendado
+      const recommendedCell = await this.page.$(
+        'div:has(span:has-text("Recomendado")) input[type="radio"], ' +
+        'div:has-text("Recomendado") input[type="radio"], ' +
+        '[data-testid*="package-size--cell"]:has-text("Recomendado"), ' +
+        'label:has-text("Recomendado"), ' +
+        'div[role="radio"]:has-text("Recomendado")'
       );
-      if (heavyCell) {
-        await heavyCell.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => null);
-        await heavyCell.click();
+      if (recommendedCell) {
+        await recommendedCell.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => null);
+        await recommendedCell.click();
+        console.log('[VintedPublish] Selected "Recomendado" package size');
         return;
       }
 
-      // Если пункта 8 нет, берем пункт 3 (Grande)
-      const grandCell = await this.page.$(
-        '[data-testid="3-package-size--cell"], #package-size-3, label[for="package_type_selector_3"]'
+      // 2. Ищем размер "Pequeño"
+      const smallCell = await this.page.$(
+        '[data-testid="1-package-size--cell"], [data-testid="1-package-size--cell--suffix"], ' +
+        '#package-size-1, label[for="package_type_selector_1"], [data-testid="package_type_selector_1"], ' +
+        'div[data-testid*="package-size"]:has-text("Pequeño"), ' +
+        'div:has-text("Pequeño") input[type="radio"], ' +
+        'label:has-text("Pequeño"), ' +
+        'div[role="radio"]:has-text("Pequeño")'
       );
-      if (grandCell) {
-        await grandCell.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => null);
-        await grandCell.click();
+      if (smallCell) {
+        await smallCell.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => null);
+        await smallCell.click();
+        console.log('[VintedPublish] Selected "Pequeño" package size');
         return;
       }
 
-      // Любой radio размера
-      const anyRadio = await this.page.$('input[name*="package_type_selector"]');
-      if (anyRadio) {
-        await anyRadio.click();
+      // 3. Если нет, берем первый радиобаттон размера (наименьший)
+      const firstRadio = await this.page.$('input[name*="package_type_selector"], input[name*="package_size"]');
+      if (firstRadio) {
+        await firstRadio.click();
+        console.log('[VintedPublish] Selected first available package size');
       }
-    } catch (_) {}
+    } catch (e) {
+      console.warn('[VintedPublish] handlePackageSize failed:', e);
+    }
   }
 
   private sanitizeCookiesFile(): void {

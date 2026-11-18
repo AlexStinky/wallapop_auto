@@ -2,9 +2,9 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { Edit, Trash2, Send, ImageIcon, ExternalLink, RotateCcw } from 'lucide-react';
+import { Edit, Trash2, Send, ImageIcon, ExternalLink, RotateCcw, Clock } from 'lucide-react';
 import { Product, getImageUrl } from '@/lib/api';
-import { formatDate } from '@/lib/utils';
+import { formatDate, cn } from '@/lib/utils';
 import { StatusBadge } from './Badge';
 import { Button } from './Button';
 import { Card } from './Card';
@@ -12,11 +12,12 @@ import { Card } from './Card';
 interface ProductCardProps {
   product: Product;
   onPublish?: (id: string, platform?: 'wallapop' | 'vinted' | 'both') => void;
+  onAddToQueue?: (id: string) => void;
   onDelete?: (id: string) => void;
   loading?: boolean;
 }
 
-export function ProductCard({ product, onPublish, onDelete, loading }: ProductCardProps) {
+export function ProductCard({ product, onPublish, onAddToQueue, onDelete, loading }: ProductCardProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const thumbnail = product.images?.[0];
@@ -53,6 +54,16 @@ export function ProductCard({ product, onPublish, onDelete, loading }: ProductCa
             <p className="mt-0.5 text-base font-bold text-[#00C9A7]">€{product.price}</p>
             <div className="mt-1 flex items-center gap-2">
               <StatusBadge status={product.status} />
+              {product.vintedStatus === 'in_queue' && product.status !== 'in_queue' && (
+                <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700">
+                  Черга Vinted
+                </span>
+              )}
+              {product.vintedStatus === 'publishing' && product.status !== 'publishing' && (
+                <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 animate-pulse">
+                  Vinted...
+                </span>
+              )}
               {product.quantity > 1 && (
                 <span className="text-xs text-gray-400">×{product.quantity}</span>
               )}
@@ -165,23 +176,45 @@ export function ProductCard({ product, onPublish, onDelete, loading }: ProductCa
         <div className="flex gap-1.5 pt-0.5">
           <button
             type="button"
-            disabled={loading}
-            onClick={() => onPublish?.(product.id, 'wallapop')}
-            className="flex-1 rounded-lg border border-[#00C9A7]/40 bg-[#00C9A7]/5 py-1.5 px-2 text-[11px] font-semibold text-[#008F75] hover:bg-[#00C9A7]/15 active:scale-95 transition-all flex items-center justify-center gap-1 disabled:opacity-50"
-            title="Опублікувати тільки на Wallapop"
+            disabled={loading || product.wallapopStatus === 'in_queue' || product.wallapopStatus === 'publishing'}
+            onClick={() => onAddToQueue?.(product.id)}
+            className={cn(
+              "flex-1 rounded-lg border py-1.5 px-2 text-[11px] font-semibold active:scale-95 transition-all flex items-center justify-center gap-1 disabled:opacity-75",
+              product.wallapopStatus === 'in_queue'
+                ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                : product.wallapopStatus === 'publishing'
+                ? "border-amber-300 bg-amber-50 text-amber-700 animate-pulse"
+                : "border-[#00C9A7]/40 bg-[#00C9A7]/5 text-[#008F75] hover:bg-[#00C9A7]/15"
+            )}
+            title={product.wallapopStatus === 'in_queue' ? "В черзі Wallapop (запуск кнопкою 'Запустити')" : "Додати товар до черги Wallapop"}
           >
-            <Send size={11} className="text-[#00C9A7]" />
-            Опублікувати на Wallapop
+            <Clock size={11} className={product.wallapopStatus === 'in_queue' ? "text-emerald-500" : "text-[#00C9A7]"} />
+            {product.wallapopStatus === 'in_queue'
+              ? 'В черзі Wallapop'
+              : product.wallapopStatus === 'publishing'
+              ? 'Публікується...'
+              : 'Додати в чергу Wallapop'}
           </button>
           <button
             type="button"
-            disabled={loading}
+            disabled={loading || product.vintedStatus === 'in_queue' || product.vintedStatus === 'publishing'}
             onClick={() => onPublish?.(product.id, 'vinted')}
-            className="flex-1 rounded-lg border border-[#09B1BA]/40 bg-[#09B1BA]/5 py-1.5 px-2 text-[11px] font-semibold text-[#07858c] hover:bg-[#09B1BA]/15 active:scale-95 transition-all flex items-center justify-center gap-1 disabled:opacity-50"
-            title="Опублікувати тільки на Vinted"
+            className={cn(
+              "flex-1 rounded-lg border py-1.5 px-2 text-[11px] font-semibold active:scale-95 transition-all flex items-center justify-center gap-1 disabled:opacity-75",
+              product.vintedStatus === 'in_queue'
+                ? "border-blue-300 bg-blue-50 text-blue-700"
+                : product.vintedStatus === 'publishing'
+                ? "border-amber-300 bg-amber-50 text-amber-700 animate-pulse"
+                : "border-[#09B1BA]/40 bg-[#09B1BA]/5 text-[#07858c] hover:bg-[#09B1BA]/15"
+            )}
+            title={product.vintedStatus === 'in_queue' ? "В черзі Vinted (інтервал не частіше 1 хв)" : "Опублікувати тільки на Vinted"}
           >
-            <Send size={11} className="text-[#09B1BA]" />
-            Опублікувати на Vinted
+            <Send size={11} className={product.vintedStatus === 'in_queue' ? "text-blue-500" : "text-[#09B1BA]"} />
+            {product.vintedStatus === 'in_queue'
+              ? 'В черзі Vinted'
+              : product.vintedStatus === 'publishing'
+              ? 'Публікується...'
+              : 'Опублікувати на Vinted'}
           </button>
         </div>
       </div>

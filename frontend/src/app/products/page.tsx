@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Plus, Package, RefreshCw, Search, X, Send } from 'lucide-react';
-import { Product, ProductStatus, getProducts, publishProductNow, publishAllProducts, deleteProduct } from '@/lib/api';
+import { Product, ProductStatus, getProducts, publishProductNow, publishAllProducts, deleteProduct, addProductToQueue } from '@/lib/api';
+import { QueueStatus } from '@/components/ui/QueueStatus';
 import { ProductCard } from '@/components/ui/ProductCard';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -27,21 +28,23 @@ export default function ProductsPage() {
   const [publishingId, setPublishingId] = useState<string | null>(null);
   const [publishingAll, setPublishingAll] = useState(false);
 
-  const fetchProducts = async () => {
-    setLoading(true);
+  const fetchProducts = async (showLoading = false) => {
+    if (showLoading) setLoading(true);
     try {
       const data = await getProducts();
       setProducts(data);
     } catch {
-      toast.error('Не вдалося завантажити товари');
+      if (showLoading) {
+        toast.error('Не вдалося завантажити товари');
+      }
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchProducts();
-    const interval = setInterval(fetchProducts, 3000);
+    fetchProducts(true);
+    const interval = setInterval(() => fetchProducts(false), 3000);
     return () => clearInterval(interval);
   }, []);
 
@@ -61,12 +64,18 @@ export default function ProductsPage() {
   const handlePublish = async (id: string, platform?: 'wallapop' | 'vinted' | 'both') => {
     setPublishingId(id);
     try {
-      await publishProductNow(id, platform);
-      const targetLabel = platform === 'wallapop' ? 'на Wallapop' : platform === 'vinted' ? 'на Vinted' : '';
-      toast.success(`Публікацію ${targetLabel} запущено!`.trim());
+      const res = await publishProductNow(id, platform);
+      const targetLabel = platform === 'wallapop' ? 'на Wallapop' : platform === 'vinted' ? 'до черги Vinted' : '';
+      toast.success(res.message || `Публікацію ${targetLabel} запущено!`.trim());
       await fetchProducts();
 
-      // Poll until product finishes publishing
+      // Якщо тільки Vinted — товар додано до черги, статус оновлюється у фоні
+      if (platform === 'vinted') {
+        setPublishingId(null);
+        return;
+      }
+
+      // Poll until product finishes publishing on Wallapop
       let attempts = 0;
       const pollTimer = setInterval(async () => {
         attempts++;
@@ -74,11 +83,7 @@ export default function ProductsPage() {
           const freshProducts = await getProducts();
           setProducts(freshProducts);
           const current = freshProducts.find((p) => p.id === id);
-          const isDone = platform === 'wallapop'
-            ? current?.wallapopStatus !== 'publishing'
-            : platform === 'vinted'
-            ? current?.vintedStatus !== 'publishing'
-            : current?.status !== 'publishing';
+          const isDone = current?.wallapopStatus !== 'publishing';
 
           if (current && isDone) {
             clearInterval(pollTimer);
@@ -88,18 +93,6 @@ export default function ProductsPage() {
                 toast.success('Товар успішно опубліковано на Wallapop!');
               } else if (current.wallapopStatus === 'error') {
                 toast.error(current.errorMessage || 'Помилка публікації на Wallapop', { duration: 6000 });
-              }
-            } else if (platform === 'vinted') {
-              if (current.vintedStatus === 'published') {
-                toast.success('Товар успішно опубліковано на Vinted!');
-              } else if (current.vintedStatus === 'error') {
-                toast.error(current.errorMessage || 'Помилка публікації на Vinted', { duration: 6000 });
-              }
-            } else {
-              if (current.status === 'published') {
-                toast.success('Товар успішно опубліковано!');
-              } else if (current.status === 'error') {
-                toast.error(current.errorMessage || 'Помилка публікації', { duration: 6000 });
               }
             }
           }
@@ -112,6 +105,16 @@ export default function ProductsPage() {
     } catch (err: any) {
       toast.error(err?.response?.data?.error || 'Помилка при публікації');
       setPublishingId(null);
+    }
+  };
+
+  const handleAddToQueue = async (id: string) => {
+    try {
+      const res = await addProductToQueue(id);
+      toast.success(res.message || 'Товар додано до черги Wallapop');
+      await fetchProducts(false);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Помилка додавання до черги');
     }
   };
 
@@ -160,7 +163,7 @@ export default function ProductsPage() {
           <Button
             variant="ghost"
             size="sm"
-            onClick={fetchProducts}
+            onClick={() => fetchProducts(true)}
             loading={loading}
             className="h-9 w-9 rounded-xl p-0"
           >
@@ -168,6 +171,9 @@ export default function ProductsPage() {
           </Button>
         </div>
       </div>
+
+      {/* Queue control widget */}
+      <QueueStatus />
 
       {/* Search */}
       <div className="relative">
@@ -247,6 +253,7 @@ export default function ProductsPage() {
               key={product.id}
               product={product}
               onPublish={handlePublish}
+              onAddToQueue={handleAddToQueue}
               onDelete={handleDelete}
               loading={publishingId === product.id}
             />

@@ -91,6 +91,7 @@ class QueueService {
       where: { id: productId },
       data: {
         status: 'in_queue',
+        wallapopStatus: 'in_queue',
         queueOrder: this.state.items.length,
         errorMessage: null,
         wallapopId: null,

@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { ArrowLeft, Edit, Send, Trash2, ExternalLink, AlertCircle, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
-import { Product, getProduct, publishProductNow, deleteProduct, getImageUrl } from '@/lib/api';
+import { ArrowLeft, Edit, Send, Trash2, ExternalLink, AlertCircle, ChevronLeft, ChevronRight, RotateCcw, Clock } from 'lucide-react';
+import { Product, getProduct, publishProductNow, deleteProduct, getImageUrl, addProductToQueue } from '@/lib/api';
 import { StatusBadge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -128,6 +128,18 @@ export default function ProductDetailPage() {
     } catch (err: any) {
       toast.error(err?.response?.data?.error || 'Помилка при публікації');
       setPublishing(false);
+    }
+  };
+
+  const handleAddToQueue = async () => {
+    if (!product) return;
+    try {
+      const res = await addProductToQueue(product.id);
+      toast.success(res.message || 'Товар додано до черги Wallapop');
+      const updated = await getProduct(id);
+      setProduct(updated);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || 'Помилка додавання до черги');
     }
   };
 
@@ -331,21 +343,31 @@ export default function ProductDetailPage() {
           <div className="flex gap-2">
             <button
               type="button"
-              disabled={publishing}
-              onClick={() => handlePublish('wallapop')}
+              disabled={publishing || product.wallapopStatus === 'in_queue' || product.wallapopStatus === 'publishing'}
+              onClick={handleAddToQueue}
               className="flex-1 rounded-xl border border-[#00C9A7] bg-[#00C9A7]/10 py-2.5 px-3 text-xs sm:text-sm font-semibold text-[#008F75] shadow-sm hover:bg-[#00C9A7]/20 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+              title={product.wallapopStatus === 'in_queue' ? "В черзі Wallapop (запуск кнопкою 'Запустити')" : "Додати в чергу Wallapop"}
             >
-              <Send size={14} className="text-[#00C9A7]" />
-              Опублікувати на Wallapop
+              <Clock size={14} className="text-[#00C9A7]" />
+              {product.wallapopStatus === 'in_queue'
+                ? 'В черзі Wallapop'
+                : product.wallapopStatus === 'publishing'
+                ? 'Публікується...'
+                : 'Додати в чергу Wallapop'}
             </button>
             <button
               type="button"
-              disabled={publishing}
+              disabled={publishing || product.vintedStatus === 'in_queue' || product.vintedStatus === 'publishing'}
               onClick={() => handlePublish('vinted')}
               className="flex-1 rounded-xl border border-[#09B1BA] bg-[#09B1BA]/10 py-2.5 px-3 text-xs sm:text-sm font-semibold text-[#07858c] shadow-sm hover:bg-[#09B1BA]/20 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+              title={product.vintedStatus === 'in_queue' ? "В черзі Vinted (інтервал не частіше 1 хв)" : "Опублікувати на Vinted"}
             >
               <Send size={14} className="text-[#09B1BA]" />
-              Опублікувати на Vinted
+              {product.vintedStatus === 'in_queue'
+                ? 'В черзі Vinted'
+                : product.vintedStatus === 'publishing'
+                ? 'Публікується...'
+                : 'Опублікувати на Vinted'}
             </button>
           </div>
         </div>

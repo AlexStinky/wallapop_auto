@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const queue_service_1 = require("../services/queue.service");
+const vinted_queue_service_1 = require("../services/vinted-queue.service");
 const error_1 = require("../middleware/error");
 const router = (0, express_1.Router)();
 function formatQueueState(state) {
@@ -11,11 +12,16 @@ function formatQueueState(state) {
         processing: state.currentItem,
         completed: state.completedCount,
         failed: state.failedCount,
+        vintedQueue: vinted_queue_service_1.vintedQueueService.getState(),
     };
 }
 // GET /api/queue — return current queue state
 router.get('/', (_req, res) => {
     res.json(formatQueueState(queue_service_1.queueService.getState()));
+});
+// GET /api/queue/vinted — return Vinted queue state
+router.get('/vinted', (_req, res) => {
+    res.json(vinted_queue_service_1.vintedQueueService.getState());
 });
 // POST /api/queue/start — begin processing
 router.post('/start', async (_req, res, next) => {

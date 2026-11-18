@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { queueService, queueEvents } from '../services/queue.service';
+import { vintedQueueService } from '../services/vinted-queue.service';
 import { createError } from '../middleware/error';
 
 const router = Router();
@@ -11,12 +12,18 @@ function formatQueueState(state: ReturnType<typeof queueService.getState>) {
     processing: state.currentItem,
     completed: state.completedCount,
     failed: state.failedCount,
+    vintedQueue: vintedQueueService.getState(),
   };
 }
 
 // GET /api/queue — return current queue state
 router.get('/', (_req: Request, res: Response) => {
   res.json(formatQueueState(queueService.getState()));
+});
+
+// GET /api/queue/vinted — return Vinted queue state
+router.get('/vinted', (_req: Request, res: Response) => {
+  res.json(vintedQueueService.getState());
 });
 
 // POST /api/queue/start — begin processing
