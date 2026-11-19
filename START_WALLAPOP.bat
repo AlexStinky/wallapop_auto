@@ -8,7 +8,7 @@ echo           WALLAPOP BOT - Launching Services
 echo ========================================================
 echo.
 
-cd /d "%~dp0"
+cd /d "%~dp0" || goto :failed
 
 :: Ensure MongoDB service is running if installed
 net start MongoDB >nul 2>&1
@@ -27,31 +27,14 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo Checking for code updates...
-git status --porcelain >nul || goto :failed
-set "DIRTY="
-for /f "delims=" %%a in ('git status --porcelain') do set "DIRTY=1"
-if defined DIRTY (
-    echo Local changes detected. Building the current working copy.
-) else (
-    git pull --ff-only || goto :failed
-)
+echo Updating code from Git...
+git pull --ff-only || goto :failed
 
-echo Building backend...
-cd /d "%~dp0backend" || goto :failed
-call npm ci || goto :failed
-call npm run db:generate || goto :failed
-call npm run build || goto :failed
+node "%~dp0prepare-launch.js" || goto :failed
 
-echo Building frontend...
-cd /d "%~dp0frontend" || goto :failed
-call npm ci || goto :failed
-call npm run build || goto :failed
-
-cd /d "%~dp0"
 echo - Starting Backend (port 3001)...
 set "HOST=127.0.0.1"
-start "Wallapop Backend" /D "%~dp0backend" cmd /d /k "title Wallapop Backend && node dist/index.js"
+start "Wallapop Backend" /D "%~dp0backend" cmd /d /k "title Wallapop Backend && node .launcher-dist/index.js"
 
 echo - Starting Frontend (port 3000)...
 start "Wallapop Frontend" /D "%~dp0frontend" cmd /d /k "title Wallapop Frontend && npm start"
