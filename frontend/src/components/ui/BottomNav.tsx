@@ -23,17 +23,8 @@ export function BottomNav() {
         <div className="px-3 pt-2.5 pb-2 border-b border-gray-100 flex gap-2">
           <button
             id="btn-add-to-queue"
-            type="button"
-            onClick={() => {
-              if (typeof window !== 'undefined') (window as any).__productSubmitMode = 'queue';
-              const hiddenSubmit = document.getElementById('product-form-hidden-submit');
-              if (hiddenSubmit) {
-                hiddenSubmit.click();
-              } else {
-                const form = document.getElementById('product-form') as HTMLFormElement | null;
-                if (form) form.requestSubmit();
-              }
-            }}
+            type="submit"
+            form="product-form"
             className="flex-1 rounded-full border border-[#00C9A7] bg-white py-3 px-2 text-xs sm:text-sm font-semibold text-[#008F75] shadow-sm transition-all hover:bg-[#00C9A7]/5 active:scale-[0.98] flex items-center justify-center gap-1.5 whitespace-nowrap"
           >
             <Clock size={15} className="text-[#00C9A7] flex-shrink-0" />
@@ -41,17 +32,8 @@ export function BottomNav() {
           </button>
           <button
             id="btn-publish-now"
-            type="button"
-            onClick={() => {
-              if (typeof window !== 'undefined') (window as any).__productSubmitMode = 'publish_now';
-              const hiddenSubmit = document.getElementById('product-form-hidden-submit');
-              if (hiddenSubmit) {
-                hiddenSubmit.click();
-              } else {
-                const form = document.getElementById('product-form') as HTMLFormElement | null;
-                if (form) form.requestSubmit();
-              }
-            }}
+            type="submit"
+            form="product-form"
             className="flex-1 rounded-full bg-[#00C9A7] py-3 px-2 text-xs sm:text-sm font-bold text-white shadow-md transition-all hover:bg-[#00b396] active:scale-[0.98] flex items-center justify-center gap-1.5 whitespace-nowrap"
           >
             <Send size={15} className="flex-shrink-0" />
@@ -71,16 +53,8 @@ export function BottomNav() {
           </button>
           <button
             id="btn-save-product"
-            type="button"
-            onClick={() => {
-              const hiddenSubmit = document.getElementById('product-form-hidden-submit');
-              if (hiddenSubmit) {
-                hiddenSubmit.click();
-              } else {
-                const form = document.getElementById('product-form') as HTMLFormElement | null;
-                if (form) form.requestSubmit();
-              }
-            }}
+            type="submit"
+            form="product-form"
             className="flex-1 rounded-full bg-[#00C9A7] py-3 px-2 text-xs sm:text-sm font-bold text-white shadow-md transition-all hover:bg-[#00b396] active:scale-[0.98] flex items-center justify-center gap-1.5 whitespace-nowrap"
           >
             <Save size={15} className="flex-shrink-0" />

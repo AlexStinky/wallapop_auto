@@ -296,6 +296,36 @@ router.post('/vinted/open-browser', async (_req, res, next) => {
         next(err);
     }
 });
+// DELETE /api/settings/cookies
+router.delete('/cookies', async (_req, res, next) => {
+    try {
+        const deleted = browser_service_1.browserService.clearCookies();
+        res.json({
+            success: true,
+            message: deleted
+                ? 'Кукі Wallapop успішно видалено. Сесія скинута.'
+                : 'Файл кукі Wallapop не знайдено або вже видалено.',
+        });
+    }
+    catch (err) {
+        next(err);
+    }
+});
+// DELETE /api/settings/vinted/cookies
+router.delete('/vinted/cookies', async (_req, res, next) => {
+    try {
+        const deleted = vinted_service_1.vintedBrowserService.clearCookies();
+        res.json({
+            success: true,
+            message: deleted
+                ? 'Кукі Vinted успішно видалено. Застаріла або заблокована сесія скинута.'
+                : 'Файл кукі Vinted не знайдено або вже видалено.',
+        });
+    }
+    catch (err) {
+        next(err);
+    }
+});
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 async function getOrCreateSettings() {
     const existing = await prisma_1.default.settings.findFirst();

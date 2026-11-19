@@ -37,6 +37,7 @@ exports.vintedBrowserService = exports.VintedBrowserService = void 0;
 const playwright_1 = require("playwright");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
+const uploads_1 = require("../uploads");
 const COOKIES_PATH = path.join(process.cwd(), '.vinted-cookies.json');
 const DESKTOP_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 class VintedBrowserService {
@@ -45,6 +46,7 @@ class VintedBrowserService {
         this.context = null;
         this.page = null;
         this.isHeadless = true;
+        this.hasRateLimit = false;
     }
     // ─── Lifecycle ──────────────────────────────────────────────────────────────
     async initialize(headless) {
@@ -52,6 +54,7 @@ class VintedBrowserService {
             await this.close();
         }
         this.isHeadless = headless;
+        this.hasRateLimit = false;
         const launchArgs = [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -297,7 +300,7 @@ class VintedBrowserService {
     }
     async close() {
         try {
-            if (this.context) {
+            if (this.context && !this.hasRateLimit) {
                 await this.context.storageState({ path: COOKIES_PATH });
             }
         }
@@ -311,6 +314,28 @@ class VintedBrowserService {
         this.context = null;
         this.browser = null;
         console.log('[VintedBrowser] Closed');
+    }
+    clearCookies() {
+        let deleted = false;
+        const pathsToCheck = [
+            COOKIES_PATH,
+            path.resolve(__dirname, '../../.vinted-cookies.json'),
+            path.resolve(process.cwd(), '.vinted-cookies.json'),
+            path.resolve(process.cwd(), '../.vinted-cookies.json'),
+        ];
+        for (const p of pathsToCheck) {
+            try {
+                if (fs.existsSync(p)) {
+                    fs.unlinkSync(p);
+                    deleted = true;
+                    console.log('[VintedBrowser] Cleared cookies file %s', p);
+                }
+            }
+            catch (err) {
+                console.warn('[VintedBrowser] Error deleting %s:', p, err);
+            }
+        }
+        return deleted;
     }
     async acceptCookies(page) {
         try {
@@ -408,6 +433,7 @@ class VintedBrowserService {
                 return text.includes('You are rate limited') || text.includes('blocked for this computer');
             }).catch(() => false);
             if (isRateLimited) {
+                this.hasRateLimit = true;
                 return {
                     success: false,
                     error: 'Vinted тимчасово обмежив доступ (You are rate limited: blocked due to too many requests). Зробіть паузу 15-30 хв або змініть IP.',
@@ -442,19 +468,17 @@ class VintedBrowserService {
             // Если фоток меньше 3 — публикуем все, если 3 и больше — пропускаем первые две
             const vintedImages = images.length < 3 ? images : images.slice(2);
             if (vintedImages.length > 0) {
-                const absoluteImagePaths = vintedImages.map((imgPath) => {
-                    if (path.isAbsolute(imgPath))
-                        return imgPath;
-                    return path.resolve(process.env.UPLOAD_DIR || './uploads', path.basename(imgPath));
-                }).filter((p) => fs.existsSync(p));
+                const absoluteImagePaths = vintedImages.map(uploads_1.resolveUploadedPhoto).filter((p) => p !== null);
                 if (absoluteImagePaths.length > 0) {
                     console.log('[VintedPublish] Uploading %d photos (%s): %j', absoluteImagePaths.length, images.length < 3 ? 'all photos (less than 3)' : 'skipped first 2', absoluteImagePaths);
                     let fileInput = await this.page.$('input[data-testid="add-photos-input"], input[name="photos"], input[type="file"][accept*="image"]');
                     if (!fileInput) {
                         fileInput = await this.page.waitForSelector('input[data-testid="add-photos-input"], input[name="photos"], input[type="file"][accept*="image"]', { state: 'attached', timeout: 25000 }).catch(async () => {
-                            const criticalDialog = await this.page?.$('[data-testid*="critical-error"]');
-                            if (criticalDialog) {
-                                throw new Error('Vinted показав критичну помилку форми (item-upload-critical-error-dialog). Зачекайте перед повторною спробою.');
+                            const criticalDialog = await this.page?.$('[data-testid*="critical-error"], [data-testid="item-upload-critical-error-dialog"]');
+                            if (criticalDialog && await criticalDialog.isVisible().catch(() => false)) {
+                                const dialogText = await criticalDialog.innerText().catch(() => '');
+                                const cleanMsg = dialogText.replace(/\s+/g, ' ').trim();
+                                throw new Error(`Vinted показав критичну помилку форми: ${cleanMsg || 'item-upload-critical-error-dialog'}`);
                             }
                             const currentUrl = this.page?.url() || '';
                             if (currentUrl.includes('/login') || currentUrl.includes('/auth')) {
@@ -519,8 +543,10 @@ class VintedBrowserService {
                 console.log('[VintedPublish] Clicking submit button...');
                 await this.dismissAuthenticityModal();
                 const critCheck = await this.page.$('[data-testid*="critical-error"], [data-testid="item-upload-critical-error-dialog"]');
-                if (critCheck) {
-                    return { success: false, error: 'Vinted показав критичну помилку форми (item-upload-critical-error-dialog). Спрацював ліміт або потрібна пауза.' };
+                if (critCheck && await critCheck.isVisible().catch(() => false)) {
+                    const dialogText = await critCheck.innerText().catch(() => '');
+                    const cleanMsg = dialogText.replace(/\s+/g, ' ').trim();
+                    return { success: false, error: `Vinted показав критичну помилку форми: ${cleanMsg || 'item-upload-critical-error-dialog'}` };
                 }
                 await submitBtn.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => null);
                 await this.page.waitForTimeout(500);
@@ -610,16 +636,19 @@ class VintedBrowserService {
                     return text.includes('You are rate limited') || text.includes('blocked for this computer');
                 });
                 if (isRateLimited) {
+                    this.hasRateLimit = true;
                     return {
                         success: false,
                         error: 'Vinted заблокував доступ за забагато запитів (You are rate limited). Зробіть паузу 15-30 хв або змініть IP.',
                     };
                 }
-                const critDialog = await this.page?.$('[data-testid*="critical-error"]');
-                if (critDialog) {
+                const critDialog = await this.page?.$('[data-testid*="critical-error"], [data-testid="item-upload-critical-error-dialog"]');
+                if (critDialog && await critDialog.isVisible().catch(() => false)) {
+                    const dialogText = await critDialog.innerText().catch(() => '');
+                    const cleanMsg = dialogText.replace(/\s+/g, ' ').trim();
                     return {
                         success: false,
-                        error: 'Vinted показав критичну помилку форми (item-upload-critical-error-dialog). Спрацював ліміт або потрібна пауза.',
+                        error: `Vinted показав критичну помилку форми: ${cleanMsg || 'item-upload-critical-error-dialog'}`,
                     };
                 }
             }
@@ -632,32 +661,126 @@ class VintedBrowserService {
         if (!this.page)
             return;
         try {
-            // 1. Проверяем, появились ли готовые рекомендации категорий (chips) на основе названия и фото
-            await this.page.waitForTimeout(600);
-            const suggestionChips = await this.page.$$('button[data-testid*="catalog-suggestion"], button[data-testid*="category-suggestion"], [data-testid*="suggestion"] button');
+            const categoryTrigger = await this.page.$('button[data-testid="catalog-select-dropdown-input"], button[data-testid*="catalog"], #category, input[name="category"], [data-testid*="catalog-select-dropdown"]');
+            if (!categoryTrigger)
+                return;
+            // 0. Проверяем: возможно категория уже выбрана на странице
+            const initialText = await categoryTrigger.innerText().catch(() => '');
+            if (initialText && !initialText.includes('Elige') && !initialText.includes('subcategoría')) {
+                console.log('[VintedPublish] Category already selected: "%s"', initialText.trim());
+                return;
+            }
+            // 1. Проверяем, появились ли готовые рекомендации категорий (chips) на основе названия и фото (ждем до 2с)
+            await this.page.waitForTimeout(800);
+            let suggestionChips = await this.page.$$('button[data-testid*="catalog-suggestion"], button[data-testid*="category-suggestion"], [data-testid*="suggestion"] button');
+            if (suggestionChips.length === 0) {
+                await this.page.waitForTimeout(1000);
+                suggestionChips = await this.page.$$('button[data-testid*="catalog-suggestion"], button[data-testid*="category-suggestion"], [data-testid*="suggestion"] button');
+            }
             if (suggestionChips.length > 0) {
-                console.log('[VintedPublish] Found %d category suggestion chips, clicking first...', suggestionChips.length);
-                await suggestionChips[0].evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => null);
-                await suggestionChips[0].click();
+                console.log('[VintedPublish] Found %d category suggestion chips', suggestionChips.length);
+                // Проверяем, может одна из подсказок уже активна (чекнута)
+                let activeChip = null;
+                for (const chip of suggestionChips) {
+                    const isAct = await chip.evaluate((node) => {
+                        return (node.getAttribute('aria-pressed') === 'true' ||
+                            node.getAttribute('aria-checked') === 'true' ||
+                            node.getAttribute('aria-selected') === 'true' ||
+                            node.classList.contains('is-selected') ||
+                            node.classList.contains('active'));
+                    }).catch(() => false);
+                    if (isAct) {
+                        activeChip = chip;
+                        break;
+                    }
+                }
+                if (activeChip) {
+                    console.log('[VintedPublish] A category suggestion chip is ALREADY selected. Keeping it.');
+                    return;
+                }
+                // Если не выбрана — ищем совпадение с указанной пользователем категорией, или берем первую
+                const userCatLow = (subcategoryName || categoryName || '').toLowerCase().trim();
+                let targetChip = suggestionChips[0];
+                if (userCatLow) {
+                    for (const chip of suggestionChips) {
+                        const chipTxt = (await chip.innerText().catch(() => '')).toLowerCase();
+                        if (chipTxt.includes(userCatLow)) {
+                            targetChip = chip;
+                            break;
+                        }
+                    }
+                }
+                const chipLabel = (await targetChip.innerText().catch(() => '')).trim();
+                console.log('[VintedPublish] Clicking suggested category chip: "%s"', chipLabel);
+                await targetChip.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => null);
+                await targetChip.click();
                 await this.page.waitForTimeout(1000);
                 const checkTrigger = await this.page.$('button[data-testid="catalog-select-dropdown-input"], #category, [data-testid*="catalog-select"]');
                 const txt = checkTrigger ? (await checkTrigger.innerText().catch(() => '')) : '';
                 if (txt && !txt.includes('Elige') && !txt.includes('subcategoría')) {
-                    console.log('[VintedPublish] Category set via suggestion chip: "%s"', txt.trim());
+                    console.log('[VintedPublish] Category successfully set via suggestion chip: "%s"', txt.trim());
                     return;
                 }
             }
             // 2. Открываем селектор категории
-            const categoryTrigger = await this.page.$('button[data-testid="catalog-select-dropdown-input"], button[data-testid*="catalog"], #category, input[name="category"], [data-testid*="catalog-select-dropdown"]');
-            if (!categoryTrigger)
-                return;
             await categoryTrigger.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => null);
             await categoryTrigger.click();
             await this.page.waitForTimeout(800);
             const containerSelector = '[data-radix-popper-content-wrapper], [data-testid="catalog-select-dropdown-content"], [data-testid*="catalog-select"], div[role="dialog"]';
-            // 3. Спускаемся вглубь дерева категорий до конечной подкатегории (до 7 уровней)
+            // 2a. Проверяем: если внутри селектора категория уже выбрана (стоит чекбокс/радио) — не сбрасываем!
+            const alreadyCheckedOption = await this.page.$(`${containerSelector} [role="radio"][aria-checked="true"], ` +
+                `${containerSelector} [role="checkbox"][aria-checked="true"], ` +
+                `${containerSelector} input:checked`);
+            if (alreadyCheckedOption) {
+                console.log('[VintedPublish] Category option in dropdown is ALREADY checked. Keeping it.');
+                await this.page.keyboard.press('Escape').catch(() => null);
+                return;
+            }
+            // 2b. Проверяем: есть ли в выпадающем списке автоматические предложения от Vinted
+            const suggestedInDropdown = await this.page.$$(`${containerSelector} [data-testid*="suggestion"] [role="radio"], ` +
+                `${containerSelector} [data-testid*="recommended"] [role="radio"], ` +
+                `${containerSelector} [data-testid*="suggested"] [role="radio"]`);
+            if (suggestedInDropdown.length > 0) {
+                const firstSug = suggestedInDropdown[0];
+                const label = (await firstSug.innerText().catch(() => '')).trim();
+                console.log('[VintedPublish] Found auto-suggested category in dropdown: "%s". Checking it...', label);
+                await this.safeCheckOption(firstSug, label);
+                await this.page.waitForTimeout(800);
+                await this.page.keyboard.press('Escape').catch(() => null);
+                return;
+            }
+            // 3. Этап: если категории нет, ищем строку поиска и вводим ту, что указал пользователь
+            const targetQuery = (categoryName || subcategoryName || '').trim();
+            const searchInput = await this.page.$(`${containerSelector} input[type="search"], ${containerSelector} input[placeholder*="buscar" i], ${containerSelector} input[placeholder*="categor" i], ${containerSelector} input[type="text"]`);
+            if (searchInput && targetQuery) {
+                console.log('[VintedPublish] Searching user category: "%s"', targetQuery);
+                await searchInput.fill(targetQuery);
+                await this.page.waitForTimeout(800);
+                const searchResults = await this.page.$$(`${containerSelector} div[role="radio"], ${containerSelector} button[role="radio"], ${containerSelector} [role="menuitemradio"], ${containerSelector} div[role="checkbox"], ${containerSelector} div[class*="option"]`);
+                if (searchResults.length > 0) {
+                    let matched = null;
+                    const queryLow = targetQuery.toLowerCase();
+                    for (const opt of searchResults) {
+                        const optText = (await opt.innerText().catch(() => '')).toLowerCase();
+                        if (optText.includes(queryLow)) {
+                            matched = opt;
+                            break;
+                        }
+                    }
+                    if (!matched) {
+                        matched = searchResults[0];
+                    }
+                    const matchedLabel = (await matched.innerText().catch(() => '')).trim();
+                    console.log('[VintedPublish] Selected category search result: "%s"', matchedLabel);
+                    await this.safeCheckOption(matched, matchedLabel);
+                    await this.page.waitForTimeout(800);
+                    await this.page.keyboard.press('Escape').catch(() => null);
+                    return;
+                }
+            }
+            // 4. Запасной спуск вглубь дерева категорий до конечной подкатегории (до 7 уровней)
             for (let step = 0; step < 7; step++) {
-                // Проверяем, есть ли радио-кнопки (конечный уровень подкатегории)
+                // Проверяем радио-кнопки (конечный уровень подкатегории)
                 const radioOptions = await this.page.$$(`${containerSelector} div[role="radio"], ${containerSelector} button[role="radio"], ${containerSelector} [role="menuitemradio"], ${containerSelector} input[type="radio"]`);
                 if (radioOptions.length > 0) {
                     let chosen = radioOptions[0];
@@ -673,7 +796,6 @@ class VintedBrowserService {
                             }
                         }
                     }
-                    // Если точного совпадения нет — ищем пункт "Otros" / "Otras" (прочее / другие)
                     if (!matched) {
                         for (const r of radioOptions) {
                             const text = (await r.innerText()).toLowerCase();
@@ -684,9 +806,9 @@ class VintedBrowserService {
                             }
                         }
                     }
-                    console.log('[VintedPublish] Selecting final leaf subcategory: "%s"', (await chosen.innerText()).trim());
-                    await chosen.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => null);
-                    await chosen.click();
+                    const chosenLabel = (await chosen.innerText()).trim();
+                    console.log('[VintedPublish] Selecting leaf subcategory: "%s"', chosenLabel);
+                    await this.safeCheckOption(chosen, chosenLabel);
                     await this.page.waitForTimeout(1000);
                     return;
                 }
@@ -694,7 +816,6 @@ class VintedBrowserService {
                 const buttons = await this.page.$$(`${containerSelector} div[role="button"], ${containerSelector} button[role="menuitem"], ${containerSelector} [role="menuitem"], ${containerSelector} button`);
                 if (buttons.length === 0)
                     break;
-                // Фильтруем кнопки назад ("Atrás", "Volver", "Back")
                 const validBranches = [];
                 for (const b of buttons) {
                     const text = (await b.innerText()).toLowerCase().trim();
@@ -708,7 +829,6 @@ class VintedBrowserService {
                 let targetBtn = validBranches[0].el;
                 let targetText = validBranches[0].text;
                 if (step === 0) {
-                    // Корневой уровень каталога Vinted: Mujeres, Hombres, Niños, Hogar, Entretenimiento, Mascotas
                     const catLow = (categoryName || '').toLowerCase();
                     let preferredRoot = 'hogar';
                     if (catLow.match(/hogar|casa|cocina|mueble|bricolaje|jard[íi]n|herramienta|v[áa]lvula|electrov[áa]lvula|cafetera|l[áa]mpara|limpieza|ba[ñn]o|decoraci/)) {
@@ -735,7 +855,6 @@ class VintedBrowserService {
                     }
                 }
                 else {
-                    // Последующие уровни: ищем подходящую подкатегорию либо "Otros"
                     const subLow = (subcategoryName || categoryName || '').toLowerCase().trim();
                     let found = false;
                     if (subLow) {
@@ -749,7 +868,6 @@ class VintedBrowserService {
                         }
                     }
                     if (!found) {
-                        // Ищем раздел "Otros" / "Otras"
                         for (const vb of validBranches) {
                             if (vb.text.includes('otro') || vb.text.includes('otra') || vb.text.includes('general')) {
                                 targetBtn = vb.el;
@@ -765,13 +883,14 @@ class VintedBrowserService {
                 await targetBtn.click();
                 await this.page.waitForTimeout(800);
             }
-            // Проверяем, не осталось ли сообщение "Elige una subcategoría"
+            // 5. Проверяем, не осталось ли "Elige una subcategoría"
             const afterText = await categoryTrigger.innerText().catch(() => '');
             if (afterText.includes('Elige') || afterText.includes('subcategoría')) {
                 console.warn('[VintedPublish] Subcategory still not selected ("%s"), selecting any leaf option...', afterText.trim());
                 const anyRadio = await this.page.$(`${containerSelector} div[role="radio"], ${containerSelector} button[role="radio"], ${containerSelector} input[type="radio"]`);
                 if (anyRadio) {
-                    await anyRadio.click();
+                    const label = (await anyRadio.innerText().catch(() => '')).trim();
+                    await this.safeCheckOption(anyRadio, label);
                     await this.page.waitForTimeout(800);
                 }
             }

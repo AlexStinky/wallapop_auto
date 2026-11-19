@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Product } from '@prisma/client';
 import { PublishResult } from '../types';
+import { resolveUploadedPhoto } from '../uploads';
 
 const COOKIES_PATH = path.join(process.cwd(), '.session-cookies.json');
 const DESKTOP_UA =
@@ -254,6 +255,28 @@ class BrowserService {
     this.context = null;
     this.browser = null;
     console.log('[Browser] Closed');
+  }
+
+  clearCookies(): boolean {
+    let deleted = false;
+    const pathsToCheck = [
+      COOKIES_PATH,
+      path.resolve(__dirname, '../../.session-cookies.json'),
+      path.resolve(process.cwd(), '.session-cookies.json'),
+      path.resolve(process.cwd(), '../.session-cookies.json'),
+    ];
+    for (const p of pathsToCheck) {
+      try {
+        if (fs.existsSync(p)) {
+          fs.unlinkSync(p);
+          deleted = true;
+          console.log('[Browser] Cleared Wallapop cookies file %s', p);
+        }
+      } catch (err) {
+        console.warn('[Browser] Error deleting %s:', p, err);
+      }
+    }
+    return deleted;
   }
 
   // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -1328,7 +1351,6 @@ class BrowserService {
         images = [];
       }
 
-      const uploadDir = process.env.UPLOAD_DIR || './uploads';
 
       // ── Navigate to upload page ──────────────────────────────────────────
       await page.goto('https://es.wallapop.com/app/catalog/upload', {
@@ -1403,16 +1425,7 @@ class BrowserService {
 
       // ── Step 3: Upload images ────────────────────────────────────────────
       if (images.length > 0) {
-        const absolutePaths = images
-          .map((img) => {
-            const basename = path.basename(img);
-            const p = path.resolve(uploadDir, basename);
-            if (fs.existsSync(p)) return p;
-            const direct = path.resolve(img);
-            if (fs.existsSync(direct)) return direct;
-            return null;
-          })
-          .filter(Boolean) as string[];
+        const absolutePaths = images.map(resolveUploadedPhoto).filter((p): p is string => p !== null);
 
         if (absolutePaths.length > 0) {
           console.log('[Browser] Uploading %d images...', absolutePaths.length);

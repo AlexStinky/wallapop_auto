@@ -46,8 +46,12 @@ const zod_1 = require("zod");
 const prisma_1 = __importDefault(require("../db/prisma"));
 const queue_service_1 = require("../services/queue.service");
 const vinted_queue_service_1 = require("../services/vinted-queue.service");
+const uploads_1 = require("../uploads");
 const error_1 = require("../middleware/error");
 const router = (0, express_1.Router)();
+router.param('id', (_req, _res, next, id) => {
+    next(/^[a-f\d]{24}$/i.test(id) ? undefined : (0, error_1.createError)('Invalid product ID', 400));
+});
 // ─── Multer Setup ─────────────────────────────────────────────────────────────
 const storage = multer_1.default.diskStorage({
     destination: (_req, _file, cb) => {
@@ -56,7 +60,7 @@ const storage = multer_1.default.diskStorage({
         cb(null, dir);
     },
     filename: (_req, file, cb) => {
-        const ext = path.extname(file.originalname).toLowerCase();
+        const ext = (0, uploads_1.imageExtension)(file.mimetype);
         cb(null, `${(0, uuid_1.v4)()}${ext}`);
     },
 });
@@ -67,11 +71,11 @@ const upload = (0, multer_1.default)({
         fieldSize: 50 * 1024 * 1024,
     },
     fileFilter: (_req, file, cb) => {
-        if (file.mimetype.startsWith('image/')) {
+        if ((0, uploads_1.imageExtension)(file.mimetype)) {
             cb(null, true);
         }
         else {
-            cb(new Error('Only image files are allowed'));
+            cb((0, error_1.createError)('Unsupported photo format', 415));
         }
     },
 });
@@ -161,6 +165,9 @@ router.post('/', async (req, res, next) => {
             throw (0, error_1.createError)(`Validation error: ${parsed.error.message}`, 400);
         }
         const data = parsed.data;
+        if (!data.publishToWallapop && !data.publishToVinted && (publishNow === true || requestedStatus === 'in_queue')) {
+            throw (0, error_1.createError)('Виберіть хоча б один сайт для публікації', 400);
+        }
         const isPublishNow = publishNow === true;
         const initialStatus = isPublishNow ? 'pending' : (requestedStatus === 'in_queue' ? 'in_queue' : 'pending');
         const product = await prisma_1.default.product.create({
@@ -172,14 +179,10 @@ router.post('/', async (req, res, next) => {
         });
         if (isPublishNow) {
             if (data.publishToVinted) {
-                vinted_queue_service_1.vintedQueueService.enqueue(product.id).catch((err) => {
-                    console.error('[VintedQueue] Failed to enqueue product %s:', product.id, err);
-                });
+                await vinted_queue_service_1.vintedQueueService.enqueue(product.id);
             }
             if (data.publishToWallapop) {
-                queue_service_1.queueService.publishDirectly(product.id, 'wallapop').catch((err) => {
-                    console.error('[PublishDirectly] Failed to publish Wallapop product %s directly:', product.id, err);
-                });
+                await queue_service_1.queueService.publishNow(product.id);
             }
         }
         else if (initialStatus === 'in_queue') {
@@ -241,14 +244,14 @@ router.delete('/:id', async (req, res, next) => {
             throw (0, error_1.createError)('Product not found', 404);
         // Remove from queue if present
         await queue_service_1.queueService.removeFromQueue(req.params.id);
+        await prisma_1.default.product.delete({ where: { id: req.params.id } });
         // Delete image files
         const images = safeParseJson(product.images, []);
-        const uploadDir = path.resolve(process.env.UPLOAD_DIR || './uploads');
         for (const img of images) {
-            const filePath = path.join(uploadDir, path.basename(img));
-            fs.unlink(filePath, () => null); // Best-effort
+            const filePath = (0, uploads_1.resolveUploadedPhoto)(img);
+            if (filePath)
+                fs.unlink(filePath, () => null); // Best-effort
         }
-        await prisma_1.default.product.delete({ where: { id: req.params.id } });
         res.json({ message: 'Product deleted successfully' });
     }
     catch (err) {
@@ -273,17 +276,18 @@ router.post('/publish-all', async (_req, res, next) => {
                 vintedIds.push(p.id);
             }
         }
-        if (vintedIds.length > 0) {
-            await vinted_queue_service_1.vintedQueueService.enqueueMany(vintedIds);
-        }
-        const wallapopCount = await queue_service_1.queueService.loadPendingFromDb();
+        const vintedCount = await vinted_queue_service_1.vintedQueueService.enqueueMany(vintedIds);
+        const wallapopProducts = pendingProducts.filter(p => p.publishToWallapop && !p.wallapopId && p.wallapopStatus !== 'published');
+        for (const product of wallapopProducts)
+            await queue_service_1.queueService.addToQueue(product.id);
+        const wallapopCount = wallapopProducts.length;
         if (wallapopCount > 0) {
             queue_service_1.queueService.startProcessing().catch((err) => {
                 console.error('[PublishAll] Failed to start Wallapop queue processing loop:', err);
             });
         }
         res.json({
-            message: `Додано до черги: Wallapop (${wallapopCount}), Vinted (${vintedIds.length}, інтервал не частіше 1 хв)`,
+            message: `Додано до черги: Wallapop (${wallapopCount}), Vinted (${vintedCount}, інтервал не частіше 1 хв)`,
             count: pendingProducts.length,
         });
     }
@@ -309,12 +313,18 @@ router.post('/:id/queue', async (req, res, next) => {
     }
 });
 // POST /api/products/:id/publish → publish (with Vinted queue rate-limiting)
-router.post('/:id/publish', async (req, res, next) => {
+router.post(['/:id/publish', '/:id/publish-now'], async (req, res, next) => {
     try {
         const product = await prisma_1.default.product.findUnique({ where: { id: req.params.id } });
         if (!product)
             throw (0, error_1.createError)('Product not found', 404);
-        const platform = (req.body?.platform || req.query?.platform);
+        const platform = req.body?.platform ?? req.query.platform;
+        if (platform !== undefined && !['wallapop', 'vinted', 'both'].includes(platform)) {
+            throw (0, error_1.createError)('Unknown publication platform', 400);
+        }
+        if ((!platform || platform === 'both') && !product.publishToWallapop && !product.publishToVinted) {
+            throw (0, error_1.createError)('Виберіть хоча б один сайт для публікації', 400);
+        }
         if (platform === 'vinted') {
             const q = await vinted_queue_service_1.vintedQueueService.enqueue(product.id);
             return res.json({
@@ -324,9 +334,7 @@ router.post('/:id/publish', async (req, res, next) => {
             });
         }
         if (platform === 'wallapop') {
-            queue_service_1.queueService.publishDirectly(product.id, 'wallapop').catch((err) => {
-                console.error('[PublishDirectly] Error publishing Wallapop directly:', err);
-            });
+            await queue_service_1.queueService.publishNow(product.id);
             return res.json({ message: 'Публікацію на Wallapop запущено', productId: product.id });
         }
         // Both platforms
@@ -334,48 +342,7 @@ router.post('/:id/publish', async (req, res, next) => {
             await vinted_queue_service_1.vintedQueueService.enqueue(product.id);
         }
         if (product.publishToWallapop) {
-            queue_service_1.queueService.publishDirectly(product.id, 'wallapop').catch((err) => {
-                console.error('[PublishDirectly] Error publishing Wallapop directly:', err);
-            });
-        }
-        return res.json({
-            message: 'Публікацію запущено (Vinted додано до черги з інтервалом не менше 1 хв)',
-            productId: product.id,
-        });
-    }
-    catch (err) {
-        next(err);
-    }
-});
-// POST /api/products/:id/publish-now → publish now (Vinted always adheres to 1-min queue)
-router.post('/:id/publish-now', async (req, res, next) => {
-    try {
-        const product = await prisma_1.default.product.findUnique({ where: { id: req.params.id } });
-        if (!product)
-            throw (0, error_1.createError)('Product not found', 404);
-        const platform = (req.body?.platform || req.query?.platform);
-        if (platform === 'vinted') {
-            const q = await vinted_queue_service_1.vintedQueueService.enqueue(product.id);
-            return res.json({
-                message: `Товар додано до черги Vinted (позиція ${q.position}, очікування ~${q.estimatedWaitSeconds}с)`,
-                productId: product.id,
-                queue: q,
-            });
-        }
-        if (platform === 'wallapop') {
-            queue_service_1.queueService.publishDirectly(product.id, 'wallapop').catch((err) => {
-                console.error('[PublishNow] Error publishing Wallapop directly:', err);
-            });
-            return res.json({ message: 'Публікацію на Wallapop запущено', productId: product.id });
-        }
-        // Both platforms
-        if (product.publishToVinted) {
-            await vinted_queue_service_1.vintedQueueService.enqueue(product.id);
-        }
-        if (product.publishToWallapop) {
-            queue_service_1.queueService.publishDirectly(product.id, 'wallapop').catch((err) => {
-                console.error('[PublishNow] Error publishing Wallapop directly:', err);
-            });
+            await queue_service_1.queueService.publishNow(product.id);
         }
         return res.json({
             message: 'Публікацію запущено (Vinted додано до черги з інтервалом не менше 1 хв)',

@@ -8,11 +8,7 @@ echo           WALLAPOP BOT - Launching Services
 echo ========================================================
 echo.
 
-cd /d %~dp0
-
-:: Try to quietly ensure firewall rules exist
-netsh advfirewall firewall add rule name="Wallapop Port 3000" dir=in action=allow protocol=TCP localport=3000 profile=any enable=yes >nul 2>&1
-netsh advfirewall firewall add rule name="Wallapop Port 3001" dir=in action=allow protocol=TCP localport=3001 profile=any enable=yes >nul 2>&1
+cd /d "%~dp0"
 
 :: Ensure MongoDB service is running if installed
 net start MongoDB >nul 2>&1
@@ -24,59 +20,49 @@ if exist "%~dp0get-ip.js" (
 )
 if "%LOCAL_IP%"=="" set LOCAL_IP=localhost
 
-echo [1/6] Clearing ports 3000 and 3001...
-for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":3001" ^| findstr "LISTENING"') do taskkill /f /pid %%a >nul 2>&1
-for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":3000" ^| findstr "LISTENING"') do taskkill /f /pid %%a >nul 2>&1
-
-echo.
-echo [2/6] Updating code from Git (git pull)...
-git checkout -- backend/dist backend/package-lock.json frontend/package-lock.json >nul 2>&1
-git pull
-if %errorlevel% neq 0 (
-    echo - Conflict detected. Resetting tracked files and retrying pull...
-    git reset --hard HEAD
-    git pull
+echo Checking service ports...
+powershell -NoProfile -Command "if ([Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners().Port -match '^(3000|3001)$') { exit 1 }"
+if errorlevel 1 (
+    echo Port 3000 or 3001 is in use. Close the existing service before launching.
+    exit /b 1
 )
 
-echo.
-echo [3/6] Clearing cache (.next, dist)...
-if exist "%~dp0frontend\.next" (
-    echo - Removing frontend .next cache...
-    rd /s /q "%~dp0frontend\.next" >nul 2>&1
+echo Checking for code updates...
+git status --porcelain >nul || goto :failed
+set "DIRTY="
+for /f "delims=" %%a in ('git status --porcelain') do set "DIRTY=1"
+if defined DIRTY (
+    echo Local changes detected. Building the current working copy.
+) else (
+    git pull --ff-only || goto :failed
 )
-if exist "%~dp0backend\dist" (
-    echo - Removing backend dist cache...
-    rd /s /q "%~dp0backend\dist" >nul 2>&1
-)
 
-echo.
-echo [4/6] Updating Backend dependencies (npm install) and building...
-cd /d %~dp0backend
-call npm install
-call npx prisma generate
-call npm run build
+echo Building backend...
+cd /d "%~dp0backend" || goto :failed
+call npm ci || goto :failed
+call npm run db:generate || goto :failed
+call npm run build || goto :failed
 
-echo.
-echo [5/6] Updating Frontend dependencies (npm install) and building...
-cd /d %~dp0frontend
-call npm install
-call npm run build
+echo Building frontend...
+cd /d "%~dp0frontend" || goto :failed
+call npm ci || goto :failed
+call npm run build || goto :failed
 
-cd /d %~dp0
-
-echo.
-echo [6/6] Starting Services...
+cd /d "%~dp0"
 echo - Starting Backend (port 3001)...
-start "Wallapop Backend" cmd /k "cd /d %~dp0backend && title Wallapop Backend && node dist/index.js"
+set "HOST=127.0.0.1"
+start "Wallapop Backend" /D "%~dp0backend" cmd /d /k "title Wallapop Backend && node dist/index.js"
 
 echo - Starting Frontend (port 3000)...
-start "Wallapop Frontend" cmd /k "cd /d %~dp0frontend && title Wallapop Frontend && npm start"
+start "Wallapop Frontend" /D "%~dp0frontend" cmd /d /k "title Wallapop Frontend && npm start"
 
 echo.
-echo Waiting 5 seconds for services to initialize...
-ping -n 6 127.0.0.1 >nul
-
-echo.
+echo Waiting for the frontend and backend...
+powershell -NoProfile -Command "foreach ($attempt in 1..30) { try { $health = Invoke-RestMethod 'http://localhost:3000/api/health' -TimeoutSec 2; if ($health.status -eq 'ok') { exit 0 } } catch {} ; Start-Sleep -Seconds 1 }; exit 1"
+if errorlevel 1 (
+    echo Health check failed. Check the service windows for details.
+    exit /b 1
+)
 echo Opening browser: http://localhost:3000
 start http://localhost:3000
 
@@ -98,10 +84,9 @@ echo ========================================================
 pause >nul
 
 echo.
-echo Stopping services...
-for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":3001" ^| findstr "LISTENING"') do taskkill /f /pid %%a >nul 2>&1
-for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":3000" ^| findstr "LISTENING"') do taskkill /f /pid %%a >nul 2>&1
-taskkill /f /fi "WINDOWTITLE eq Wallapop Backend*" >nul 2>&1
-taskkill /f /fi "WINDOWTITLE eq Wallapop Frontend*" >nul 2>&1
-echo Done.
-ping -n 3 127.0.0.1 >nul
+call "%~dp0STOP_WALLAPOP.bat"
+exit /b %errorlevel%
+
+:failed
+echo Startup stopped. See the error above.
+exit /b 1

@@ -10,6 +10,13 @@ export function getApiBaseUrl(): string {
   return 'http://127.0.0.1:3001';
 }
 
+export function getApiErrorMessage(error: unknown, fallback: string): string {
+  if (!axios.isAxiosError(error)) return fallback;
+  const body = error.response?.data;
+  const message = body?.error?.message ?? body?.message ?? body?.error;
+  return typeof message === 'string' && message ? message : fallback;
+}
+
 export function getImageUrl(path: string | undefined): string {
   if (!path) return '';
   if (path.startsWith('http://') || path.startsWith('https://')) return path;
@@ -18,7 +25,7 @@ export function getImageUrl(path: string | undefined): string {
 }
 
 const api = axios.create({
-  baseURL: typeof window !== 'undefined' ? '/api' : 'http://127.0.0.1:3001/api',
+  baseURL: typeof window !== 'undefined' ? '/api' : `${getApiBaseUrl().replace(/\/+$/, '')}/api`,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -201,6 +208,16 @@ export async function importVintedCookies(cookies: string): Promise<{ success: b
 
 export async function openVintedBrowserForLogin(): Promise<{ success: boolean; message: string }> {
   const { data } = await api.post<{ success: boolean; message: string }>('/settings/vinted/open-browser');
+  return data;
+}
+
+export async function clearVintedCookies(): Promise<{ success: boolean; message: string }> {
+  const { data } = await api.delete<{ success: boolean; message: string }>('/settings/vinted/cookies');
+  return data;
+}
+
+export async function clearWallapopCookies(): Promise<{ success: boolean; message: string }> {
+  const { data } = await api.delete<{ success: boolean; message: string }>('/settings/cookies');
   return data;
 }
 

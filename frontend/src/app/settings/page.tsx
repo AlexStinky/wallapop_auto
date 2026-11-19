@@ -1,19 +1,22 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Eye, EyeOff, AlertTriangle, Save, LogIn, ExternalLink, Key, Smartphone, Copy } from 'lucide-react';
+import { Eye, EyeOff, AlertTriangle, Save, LogIn, ExternalLink, Key, Smartphone, Copy, Trash2 } from 'lucide-react';
 import {
+  getApiErrorMessage,
   getSettings,
   updateSettings,
   testLogin,
   importCookies,
   openBrowserForLogin,
+  clearWallapopCookies,
   testVintedLogin,
   importVintedCookies,
   openVintedBrowserForLogin,
+  clearVintedCookies,
   getNetworkInfo,
   Settings,
   NetworkInfo,
@@ -46,6 +49,8 @@ export default function SettingsPage() {
   const [testingVintedLogin, setTestingVintedLogin] = useState(false);
   const [openingVintedBrowser, setOpeningVintedBrowser] = useState(false);
   const [importingVintedCookies, setImportingVintedCookies] = useState(false);
+  const [clearingCookies, setClearingCookies] = useState(false);
+  const [clearingVintedCookies, setClearingVintedCookies] = useState(false);
   const [vintedCookiesText, setVintedCookiesText] = useState('');
   const [networkInfo, setNetworkInfo] = useState<NetworkInfo | null>(null);
 
@@ -53,7 +58,7 @@ export default function SettingsPage() {
     register,
     handleSubmit,
     reset,
-    watch,
+    control,
     setValue,
     formState: { errors },
   } = useForm<FormValues>({
@@ -64,7 +69,7 @@ export default function SettingsPage() {
     },
   });
 
-  const headless = watch('headless');
+  const headless = useWatch({ control, name: 'headless' });
 
   useEffect(() => {
     const fetch = async () => {
@@ -140,8 +145,8 @@ export default function SettingsPage() {
       } else {
         toast.error(res.message || 'Не вдалося зберегти кукі');
       }
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error || 'Помилка при імпорті кукі');
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Помилка при імпорті кукі'));
     } finally {
       setImportingCookies(false);
     }
@@ -194,10 +199,36 @@ export default function SettingsPage() {
       } else {
         toast.error(res.message || 'Не вдалося зберегти кукі Vinted');
       }
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error || 'Помилка при імпорті кукі Vinted');
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Помилка при імпорті кукі Vinted'));
     } finally {
       setImportingVintedCookies(false);
+    }
+  };
+
+  const handleClearCookies = async () => {
+    if (!confirm('Видалити збережені cookies Wallapop? Сесія буде скинута.')) return;
+    setClearingCookies(true);
+    try {
+      const res = await clearWallapopCookies();
+      toast.success(res.message);
+    } catch {
+      toast.error('Помилка при очищенні cookies Wallapop');
+    } finally {
+      setClearingCookies(false);
+    }
+  };
+
+  const handleClearVintedCookies = async () => {
+    if (!confirm('Видалити збережені cookies Vinted? Застаріла або заблокована сесія буде скинута.')) return;
+    setClearingVintedCookies(true);
+    try {
+      const res = await clearVintedCookies();
+      toast.success(res.message);
+    } catch {
+      toast.error('Помилка при очищенні cookies Vinted');
+    } finally {
+      setClearingVintedCookies(false);
     }
   };
 
@@ -303,6 +334,16 @@ export default function SettingsPage() {
               <Key size={16} />
               Зберегти та перевірити Cookies Wallapop
             </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={handleClearCookies}
+              loading={clearingCookies}
+              className="border-red-200 text-red-600 hover:bg-red-50"
+            >
+              <Trash2 size={16} />
+              Очистити Cookies Wallapop (Скинути сесію)
+            </Button>
           </Card>
         </div>
 
@@ -383,6 +424,16 @@ export default function SettingsPage() {
               >
                 <Key size={16} />
                 Зберегти та перевірити Cookies Vinted
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={handleClearVintedCookies}
+                loading={clearingVintedCookies}
+                className="border-red-200 text-red-600 hover:bg-red-50"
+              >
+                <Trash2 size={16} />
+                Очистити Cookies Vinted (Скинути стару/заблоковану сесію)
               </Button>
             </div>
           </Card>

@@ -44,6 +44,7 @@ const path = __importStar(require("path"));
 const prisma_1 = __importDefault(require("./db/prisma"));
 const products_1 = __importStar(require("./routes/products"));
 const queue_1 = __importDefault(require("./routes/queue"));
+const vinted_queue_service_1 = require("./services/vinted-queue.service");
 const settings_1 = __importDefault(require("./routes/settings"));
 const error_1 = require("./middleware/error");
 const app = (0, express_1.default)();
@@ -54,20 +55,32 @@ const UPLOAD_DIR = path.resolve(process.env.UPLOAD_DIR || './uploads');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 console.log('[Server] Uploads directory:', UPLOAD_DIR);
 // ─── Middleware ───────────────────────────────────────────────────────────────
-app.use((0, cors_1.default)({
-    origin: (origin, callback) => {
-        // Allow requests with no origin (like mobile apps, curl, server-to-server) or any local network / localhost origin
-        callback(null, true);
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+app.use((0, cors_1.default)((req, callback) => {
+    const origin = req.get('origin');
+    const host = origin && URL.canParse(origin) ? new URL(origin).host : undefined;
+    const sameHost = host && (host === req.get('host') || host === req.get('x-forwarded-host'));
+    if (origin && origin !== FRONTEND_URL && !sameHost) {
+        return callback((0, error_1.createError)('Origin is not allowed', 403));
+    }
+    callback(null, {
+        origin: true,
+        credentials: true,
+        methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+        allowedHeaders: ['Content-Type', 'Authorization'],
+    });
 }));
 app.use(express_1.default.json({ limit: '100mb' }));
 app.use(express_1.default.urlencoded({ extended: true, limit: '100mb' }));
 // Static file serving for uploaded images
-app.use('/uploads', express_1.default.static(UPLOAD_DIR));
-app.use(express_1.default.static(UPLOAD_DIR));
+const photos = express_1.default.static(UPLOAD_DIR, {
+    index: false,
+    setHeaders(res) {
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+    },
+});
+app.use('/uploads', photos);
+app.use(photos);
 // ─── Routes ───────────────────────────────────────────────────────────────────
 // Direct upload endpoints
 app.post('/upload', products_1.uploadMiddleware, products_1.handleUpload);
@@ -118,8 +131,10 @@ async function initDb() {
 // ─── Start ────────────────────────────────────────────────────────────────────
 async function start() {
     await initDb();
-    app.listen(PORT, '0.0.0.0', () => {
-        console.log(`[Server] Wallapop backend running on http://0.0.0.0:${PORT}`);
+    await vinted_queue_service_1.vintedQueueService.loadPendingFromDb();
+    const host = process.env.HOST || '0.0.0.0';
+    app.listen(PORT, host, () => {
+        console.log(`[Server] Wallapop backend running on http://${host}:${PORT}`);
         console.log(`[Server] CORS allowed origin: ${FRONTEND_URL}`);
         console.log(`[Server] Upload directory: ${UPLOAD_DIR}`);
     });

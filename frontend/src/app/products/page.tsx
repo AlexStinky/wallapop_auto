@@ -1,14 +1,16 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { Plus, Package, RefreshCw, Search, X, Send } from 'lucide-react';
-import { Product, ProductStatus, getProducts, publishProductNow, publishAllProducts, deleteProduct, addProductToQueue } from '@/lib/api';
+import { getApiErrorMessage, ProductStatus, publishAllProducts, deleteProduct, addProductToQueue } from '@/lib/api';
 import { QueueStatus } from '@/components/ui/QueueStatus';
 import { ProductCard } from '@/components/ui/ProductCard';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { cn } from '@/lib/utils';
+import { useProducts } from '@/lib/use-products';
+import { usePublication } from '@/lib/use-publication';
 import toast from 'react-hot-toast';
 
 type FilterTab = 'all' | 'pending' | 'published' | 'error';
@@ -21,32 +23,14 @@ const filterTabs: { key: FilterTab; label: string }[] = [
 ];
 
 export default function ProductsPage() {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { products, setProducts, loading, loadError, fetchProducts } = useProducts();
   const [activeTab, setActiveTab] = useState<FilterTab>('all');
   const [search, setSearch] = useState('');
-  const [publishingId, setPublishingId] = useState<string | null>(null);
+  const { publish: handlePublish, busy } = usePublication(product => {
+    setProducts(previous => previous.map(item => item.id === product.id ? product : item));
+  });
   const [publishingAll, setPublishingAll] = useState(false);
 
-  const fetchProducts = async (showLoading = false) => {
-    if (showLoading) setLoading(true);
-    try {
-      const data = await getProducts();
-      setProducts(data);
-    } catch {
-      if (showLoading) {
-        toast.error('Не вдалося завантажити товари');
-      }
-    } finally {
-      if (showLoading) setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchProducts(true);
-    const interval = setInterval(() => fetchProducts(false), 3000);
-    return () => clearInterval(interval);
-  }, []);
 
   const handlePublishAll = async () => {
     setPublishingAll(true);
@@ -54,57 +38,10 @@ export default function ProductsPage() {
       const res = await publishAllProducts();
       toast.success(res.message || 'Всі товари додано до черги');
       await fetchProducts();
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error || 'Помилка при запуску черги');
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Помилка при запуску черги'));
     } finally {
       setPublishingAll(false);
-    }
-  };
-
-  const handlePublish = async (id: string, platform?: 'wallapop' | 'vinted' | 'both') => {
-    setPublishingId(id);
-    try {
-      const res = await publishProductNow(id, platform);
-      const targetLabel = platform === 'wallapop' ? 'на Wallapop' : platform === 'vinted' ? 'до черги Vinted' : '';
-      toast.success(res.message || `Публікацію ${targetLabel} запущено!`.trim());
-      await fetchProducts();
-
-      // Якщо тільки Vinted — товар додано до черги, статус оновлюється у фоні
-      if (platform === 'vinted') {
-        setPublishingId(null);
-        return;
-      }
-
-      // Poll until product finishes publishing on Wallapop
-      let attempts = 0;
-      const pollTimer = setInterval(async () => {
-        attempts++;
-        try {
-          const freshProducts = await getProducts();
-          setProducts(freshProducts);
-          const current = freshProducts.find((p) => p.id === id);
-          const isDone = current?.wallapopStatus !== 'publishing';
-
-          if (current && isDone) {
-            clearInterval(pollTimer);
-            setPublishingId(null);
-            if (platform === 'wallapop') {
-              if (current.wallapopStatus === 'published') {
-                toast.success('Товар успішно опубліковано на Wallapop!');
-              } else if (current.wallapopStatus === 'error') {
-                toast.error(current.errorMessage || 'Помилка публікації на Wallapop', { duration: 6000 });
-              }
-            }
-          }
-        } catch (_) {}
-        if (attempts >= 60) {
-          clearInterval(pollTimer);
-          setPublishingId(null);
-        }
-      }, 2000);
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error || 'Помилка при публікації');
-      setPublishingId(null);
     }
   };
 
@@ -112,9 +49,9 @@ export default function ProductsPage() {
     try {
       const res = await addProductToQueue(id);
       toast.success(res.message || 'Товар додано до черги Wallapop');
-      await fetchProducts(false);
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error || 'Помилка додавання до черги');
+      await fetchProducts();
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Помилка додавання до черги'));
     }
   };
 
@@ -163,7 +100,7 @@ export default function ProductsPage() {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => fetchProducts(true)}
+            onClick={fetchProducts}
             loading={loading}
             className="h-9 w-9 rounded-xl p-0"
           >
@@ -236,7 +173,9 @@ export default function ProductsPage() {
             <div key={i} className="h-28 animate-pulse rounded-2xl bg-white" />
           ))}
         </div>
-      ) : filtered.length === 0 ? (
+      ) : loadError && products.length === 0 ? (
+          <Card>Не вдалося завантажити товари. Перевірте з’єднання із сервером.</Card>
+        ) : filtered.length === 0 ? (
         <Card className="flex flex-col items-center justify-center py-10 text-center">
           <Package size={36} className="mb-2 text-gray-200" />
           <p className="text-sm font-medium text-gray-500">
@@ -255,7 +194,7 @@ export default function ProductsPage() {
               onPublish={handlePublish}
               onAddToQueue={handleAddToQueue}
               onDelete={handleDelete}
-              loading={publishingId === product.id}
+              loading={busy.includes(product.id)}
             />
           ))}
         </div>

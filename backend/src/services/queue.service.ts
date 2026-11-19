@@ -1,10 +1,8 @@
 import { EventEmitter } from 'events';
-import * as fs from 'fs';
-import * as path from 'path';
 import { QueueItem, QueueState } from '../types';
 import prisma from '../db/prisma';
 import { browserService } from './browser.service';
-import { vintedBrowserService } from './vinted.service';
+import { setPublicationState } from './publication-state';
 
 // ─── SSE Broadcaster ─────────────────────────────────────────────────────────
 
@@ -25,6 +23,10 @@ class QueueService {
   private isProcessing = false;
   private shouldStop = false;
 
+  private adding = new Map<string, Promise<void>>();
+  private active = new Map<string, Promise<boolean>>();
+  private browserAvailable: Promise<unknown> = Promise.resolve();
+
   // ── Public API ──────────────────────────────────────────────────────────────
 
   getState(): QueueState {
@@ -34,94 +36,50 @@ class QueueService {
   async loadPendingFromDb(): Promise<number> {
     const products = await prisma.product.findMany({
       where: {
-        OR: [
-          { status: 'in_queue' },
-          { status: 'pending' },
-        ],
-        NOT: {
-          status: 'published',
-        },
+        OR: [{ wallapopStatus: 'in_queue' }, { status: { in: ['pending', 'in_queue'] } }],
       },
-      orderBy: { createdAt: 'asc' }, // Спочатку старі, потім нові (FIFO)
+      orderBy: { createdAt: 'asc' },
     });
-
-    let added = 0;
-    for (const p of products) {
-      // Пропускати ті, які вже опубліковані
-      if (p.status === 'published' || p.wallapopId) continue;
-
-      if (!this.state.items.some((i) => i.productId === p.id)) {
-        this.state.items.push({ productId: p.id, addedAt: p.createdAt });
-        added++;
+    for (const product of products) {
+      if ((product.publishToWallapop || product.wallapopStatus === 'in_queue') &&
+          (product.wallapopStatus === 'in_queue' || (!product.wallapopId && product.wallapopStatus !== 'published'))) {
+        await this.addToQueue(product.id);
       }
-      if (p.status !== 'in_queue') {
-        await prisma.product.update({
-          where: { id: p.id },
-          data: { status: 'in_queue', queueOrder: this.state.items.length, errorMessage: null },
-        }).catch(() => null);
-      }
-    }
-
-    // Гарантуємо сортування в черзі строго за часом створення: старі попереду (FIFO)
-    const allIds = this.state.items.map((i) => i.productId);
-    const allDbProducts = await prisma.product.findMany({
-      where: { id: { in: allIds } },
-      select: { id: true, createdAt: true },
-    });
-    const dateMap = new Map(allDbProducts.map((p) => [p.id, new Date(p.createdAt).getTime()]));
-    this.state.items.sort((a, b) => (dateMap.get(a.productId) ?? 0) - (dateMap.get(b.productId) ?? 0));
-
-    if (added > 0) {
-      this.broadcast();
-      console.log('[Queue] Loaded %d pending products from DB into queue (FIFO order, total items: %d)', added, this.state.items.length);
     }
     return this.state.items.length;
   }
 
   async addToQueue(productId: string): Promise<void> {
-    const product = await prisma.product.findUnique({ where: { id: productId } });
-    if (!product) return;
+    if (this.active.has(productId) || this.state.items.some(i => i.productId === productId)) return;
+    const pending = this.adding.get(productId);
+    if (pending) return pending;
+    const addition = this.insertItem(productId);
+    this.adding.set(productId, addition);
+    try {
+      await addition;
+    } finally {
+      this.adding.delete(productId);
+    }
+  }
 
-    // Prevent duplicates in queue array
-    this.state.items = this.state.items.filter((i) => i.productId !== productId);
-    this.state.items.push({ productId, addedAt: product.createdAt });
-
-    // Update DB status (reset wallapopId if it was previously published and user wants to republish)
-    await prisma.product.update({
-      where: { id: productId },
-      data: {
-        status: 'in_queue',
-        wallapopStatus: 'in_queue',
-        queueOrder: this.state.items.length,
-        errorMessage: null,
-        wallapopId: null,
-        wallapopUrl: null,
-      },
+  private async insertItem(productId: string): Promise<void> {
+    const product = await setPublicationState(productId, 'wallapop', 'in_queue', {
+      queueOrder: this.state.items.length + 1,
     });
-
-    // Ensure queue is strictly sorted FIFO by createdAt ascending
-    const allIds = this.state.items.map((i) => i.productId);
-    const allDbProducts = await prisma.product.findMany({
-      where: { id: { in: allIds } },
-      select: { id: true, createdAt: true },
-    });
-    const dateMap = new Map(allDbProducts.map((p) => [p.id, new Date(p.createdAt).getTime()]));
-    this.state.items.sort((a, b) => (dateMap.get(a.productId) ?? 0) - (dateMap.get(b.productId) ?? 0));
-
-    this.broadcast();
-    console.log('[Queue] Added product %s (queue size: %d, sorted FIFO by createdAt)', productId, this.state.items.length);
+    if (!this.active.has(productId) && !this.state.items.some(i => i.productId === productId)) {
+      this.state.items.push({ productId, addedAt: product.createdAt });
+      this.state.items.sort((a, b) => a.addedAt.getTime() - b.addedAt.getTime());
+      this.broadcast();
+    }
   }
 
   async removeFromQueue(productId: string): Promise<void> {
-    this.state.items = this.state.items.filter((i) => i.productId !== productId);
-
-    await prisma.product.update({
-      where: { id: productId },
-      data: { status: 'pending', queueOrder: null },
-    }).catch(() => null);
-
+    const queued = this.state.items.some(item => item.productId === productId);
+    if (queued && !this.active.has(productId)) {
+      await setPublicationState(productId, 'wallapop', 'pending', { queueOrder: null });
+    }
+    this.state.items = this.state.items.filter(i => i.productId !== productId);
     this.broadcast();
-    console.log('[Queue] Removed product %s', productId);
   }
 
   async startProcessing(): Promise<void> {
@@ -140,6 +98,7 @@ class QueueService {
       return;
     }
 
+    if (this.isProcessing) return;
     this.shouldStop = false;
     this.state.isRunning = true;
     this.isProcessing = true;
@@ -162,214 +121,63 @@ class QueueService {
   }
 
   async clearQueue(): Promise<void> {
-    // Reset all in-queue products back to pending
-    const ids = this.state.items.map((i) => i.productId);
-    if (ids.length > 0) {
-      await prisma.product.updateMany({
-        where: { id: { in: ids }, status: 'in_queue' },
-        data: { status: 'pending', queueOrder: null },
+    for (const item of [...this.state.items]) {
+      if (item.productId !== this.state.currentItem) await this.removeFromQueue(item.productId);
+    }
+  }
+
+  async publishNow(productId: string): Promise<void> {
+    await this.addToQueue(productId);
+    this.publishDirectly(productId).catch(error => console.error('[Wallapop] Publication failed', productId, error));
+  }
+
+  private async publishDirectly(productId: string): Promise<boolean> {
+    const running = this.active.get(productId);
+    if (running) return running;
+
+    const publication = this.browserAvailable.then(() => this.publishWallapop(productId));
+    this.active.set(productId, publication);
+    this.browserAvailable = publication.catch(() => undefined);
+    try {
+      return await publication;
+    } finally {
+      this.active.delete(productId);
+      this.state.items = this.state.items.filter(i => i.productId !== productId);
+      this.broadcast();
+    }
+  }
+
+  private async publishWallapop(productId: string): Promise<boolean> {
+    const product = await setPublicationState(productId, 'wallapop', 'publishing', { queueOrder: null });
+    let result;
+    try {
+      const settings = await prisma.settings.findFirst();
+      await browserService.initialize(settings?.headless ?? true);
+      if (!(await browserService.isLoggedIn()) && settings?.wallapopEmail && settings.wallapopPassword) {
+        await browserService.login(settings.wallapopEmail, settings.wallapopPassword);
+      }
+      result = await browserService.publishProduct(product);
+    } catch (error) {
+      result = { success: false, error: error instanceof Error ? error.message : String(error) };
+    } finally {
+      await browserService.close().catch(() => undefined);
+    }
+    if (result.success) {
+      await setPublicationState(productId, 'wallapop', 'published', {
+        listingId: result.wallapopId ?? null, url: result.url ?? null,
+      });
+    } else {
+      await setPublicationState(productId, 'wallapop', 'error', {
+        errorMessage: 'Wallapop: ' + (result.error || 'Unknown error'),
       });
     }
-    this.state.items = [];
-    this.broadcast();
-    console.log('[Queue] Queue cleared');
-  }
-
-  // Helper: Publish a product to Wallapop, Vinted, or both based on flags
-  private async publishToBothPlatforms(
-    product: any,
-    headless: boolean,
-    platformOverride?: 'wallapop' | 'vinted' | 'both'
-  ): Promise<{ success: boolean; error?: string }> {
-    const errors: string[] = [];
-    let wallapopSuccess = false;
-    let vintedSuccess = false;
-
-    const shouldPublishWallapop = platformOverride
-      ? (platformOverride === 'wallapop' || platformOverride === 'both')
-      : product.publishToWallapop !== false;
-
-    const shouldPublishVinted = platformOverride
-      ? (platformOverride === 'vinted' || platformOverride === 'both')
-      : product.publishToVinted !== false;
-
-    // 1. Publish to Wallapop (if enabled)
-    if (shouldPublishWallapop) {
-      try {
-        console.log('[DualPublish] Step 1: Wallapop for product %s', product.id);
-        await browserService.initialize(headless);
-        const isWpLoggedIn = await browserService.isLoggedIn();
-        if (!isWpLoggedIn) {
-          const settings = await prisma.settings.findFirst();
-          if (settings?.wallapopEmail && settings?.wallapopPassword) {
-            await browserService.login(settings.wallapopEmail, settings.wallapopPassword);
-          }
-        }
-
-        const wpResult = await browserService.publishProduct(product);
-        if (wpResult.success) {
-          wallapopSuccess = true;
-          await prisma.product.update({
-            where: { id: product.id },
-            data: {
-              wallapopId: wpResult.wallapopId ?? null,
-              wallapopUrl: wpResult.url ?? null,
-              wallapopStatus: 'published',
-            },
-          }).catch(() => null);
-          console.log('[DualPublish] Wallapop success for %s', product.id);
-        } else {
-          errors.push(`Wallapop: ${wpResult.error || 'Unknown error'}`);
-          await prisma.product.update({
-            where: { id: product.id },
-            data: { wallapopStatus: 'error' },
-          }).catch(() => null);
-        }
-      } catch (wpErr: any) {
-        errors.push(`Wallapop: ${wpErr.message || String(wpErr)}`);
-        await prisma.product.update({
-          where: { id: product.id },
-          data: { wallapopStatus: 'error' },
-        }).catch(() => null);
-      } finally {
-        await browserService.close().catch(() => null);
-      }
-    }
-
-    // Small delay between platforms if both are publishing
-    if (shouldPublishWallapop && shouldPublishVinted) {
-      await this.sleep(2000);
-    }
-
-    // 2. Publish to Vinted (if enabled)
-    if (shouldPublishVinted) {
-      try {
-        console.log('[DualPublish] Step 2: Vinted for product %s', product.id);
-        await vintedBrowserService.initialize(headless);
-        const isVintedLoggedIn = await vintedBrowserService.isLoggedIn();
-        if (!isVintedLoggedIn) {
-          const settings = await prisma.settings.findFirst();
-          if (settings?.vintedEmail && settings?.vintedPassword) {
-            await vintedBrowserService.login(settings.vintedEmail, settings.vintedPassword);
-          }
-        }
-
-        const vintedResult = await vintedBrowserService.publishProduct(product);
-        if (vintedResult.success) {
-          vintedSuccess = true;
-          await prisma.product.update({
-            where: { id: product.id },
-            data: {
-              vintedId: vintedResult.vintedId ?? null,
-              vintedUrl: vintedResult.url ?? null,
-              vintedStatus: 'published',
-            },
-          }).catch(() => null);
-          console.log('[DualPublish] Vinted success for %s', product.id);
-        } else {
-          errors.push(`Vinted: ${vintedResult.error || 'Unknown error'}`);
-          await prisma.product.update({
-            where: { id: product.id },
-            data: { vintedStatus: 'error' },
-          }).catch(() => null);
-        }
-      } catch (vintedErr: any) {
-        errors.push(`Vinted: ${vintedErr.message || String(vintedErr)}`);
-        await prisma.product.update({
-          where: { id: product.id },
-          data: { vintedStatus: 'error' },
-        }).catch(() => null);
-      } finally {
-        await vintedBrowserService.close().catch(() => null);
-      }
-    }
-
-    const expectedCount = (shouldPublishWallapop ? 1 : 0) + (shouldPublishVinted ? 1 : 0);
-    const successCount = (wallapopSuccess ? 1 : 0) + (vintedSuccess ? 1 : 0);
-
-    const overallSuccess = expectedCount > 0 && successCount === expectedCount;
-    const partialSuccess = successCount > 0;
-
-    const finalStatus = overallSuccess ? 'published' : (partialSuccess ? 'published' : 'error');
-    const finalErrorMessage = errors.length > 0 ? errors.join(' | ') : null;
-
-    await prisma.product.update({
-      where: { id: product.id },
-      data: {
-        status: finalStatus,
-        errorMessage: finalErrorMessage,
-      },
-    }).catch(() => null);
-
-    return {
-      success: partialSuccess,
-      error: finalErrorMessage ?? undefined,
-    };
-  }
-
-  // Публікація ТІЛЬКИ цього одного товару прямо зараз (без черги)
-  async publishDirectly(
-    productId: string,
-    platformOverride?: 'wallapop' | 'vinted' | 'both'
-  ): Promise<{ success: boolean; error?: string }> {
-    console.log(
-      '[DirectPublish] Publishing single product directly (%s): %s',
-      platformOverride || 'all configured',
-      productId
-    );
-
-    const product = await prisma.product.findUnique({ where: { id: productId } });
-    if (!product) return { success: false, error: 'Product not found' };
-
-    // Remove from in-memory queue if it was queued
-    this.state.items = this.state.items.filter((item) => item.productId !== productId);
-
-    const shouldWallapop = platformOverride
-      ? platformOverride === 'wallapop' || platformOverride === 'both'
-      : product.publishToWallapop !== false;
-
-    const shouldVinted = platformOverride
-      ? platformOverride === 'vinted' || platformOverride === 'both'
-      : product.publishToVinted !== false;
-
-    const updateData: any = {
-      status: 'publishing',
-      errorMessage: null,
-    };
-    if (shouldWallapop) updateData.wallapopStatus = 'publishing';
-    if (shouldVinted) updateData.vintedStatus = 'publishing';
-
-    await prisma.product.update({
-      where: { id: productId },
-      data: updateData,
-    }).catch(() => null);
-    this.broadcast();
-
-    const settings = await prisma.settings.findFirst();
-    const headless = settings?.headless ?? true;
-
-    try {
-      const result = await this.publishToBothPlatforms(product, headless, platformOverride);
-      this.broadcast();
-      return result;
-    } catch (err: any) {
-      const msg = err?.message || String(err);
-      await prisma.product.update({
-        where: { id: productId },
-        data: { status: 'error', errorMessage: msg },
-      }).catch(() => null);
-      this.broadcast();
-      return { success: false, error: msg };
-    }
+    return result.success;
   }
 
   // ── Internal Processing ─────────────────────────────────────────────────────
 
   private async processLoop(): Promise<void> {
     try {
-      let settings = await prisma.settings.findFirst();
-      const headless = settings?.headless ?? true;
-
       // Process items one by one
       while (this.state.items.length > 0 && !this.shouldStop) {
         const item = this.state.items[0];
@@ -378,19 +186,19 @@ class QueueService {
 
         let published = false;
         try {
-          published = await this.processItem(item.productId, headless);
+          published = await this.publishDirectly(item.productId);
         } catch (err) {
           console.error('[Queue] Error processing item %s:', item.productId, err);
         }
 
-        // Remove from queue after processing (success or error)
-        this.state.items.shift();
+        if (published) this.state.completedCount++;
+        else this.state.failedCount++;
         this.state.currentItem = null;
         this.broadcast();
 
         // If more items remain and an item was actually published, wait delay before next item
         if (published && this.state.items.length > 0 && !this.shouldStop) {
-          settings = await prisma.settings.findFirst();
+          const settings = await prisma.settings.findFirst();
           const delay = (settings?.publishDelay ?? 10) * 1000;
           console.log('[Queue] Waiting %ds before next item (%d items remaining)', delay / 1000, this.state.items.length);
           await this.sleep(delay);
@@ -403,54 +211,6 @@ class QueueService {
       this.state.currentItem = null;
       this.broadcast();
       console.log('[Queue] Processing complete. Done: %d, Failed: %d', this.state.completedCount, this.state.failedCount);
-    }
-  }
-
-  private async processItem(productId: string, headless = true): Promise<boolean> {
-    const product = await prisma.product.findUnique({ where: { id: productId } });
-    if (!product) {
-      console.warn('[Queue] Product %s not found in DB, skipping', productId);
-      return false;
-    }
-
-    // Skip if already published on enabled platforms
-    const wallapopDone = product.publishToWallapop === false || product.wallapopStatus === 'published';
-    const vintedDone = product.publishToVinted === false || product.vintedStatus === 'published';
-    if (wallapopDone && vintedDone) {
-      console.log('[Queue] Product %s is already published on chosen platforms, skipping', productId);
-      return false;
-    }
-
-    // Mark as publishing
-    await prisma.product.update({
-      where: { id: productId },
-      data: {
-        status: 'publishing',
-        wallapopStatus: product.publishToWallapop === false ? null : (product.wallapopStatus === 'published' ? 'published' : 'publishing'),
-        vintedStatus: product.publishToVinted === false ? null : (product.vintedStatus === 'published' ? 'published' : 'publishing'),
-      },
-    }).catch(() => null);
-
-    this.broadcast();
-
-    try {
-      const result = await this.publishToBothPlatforms(product, headless);
-      if (result.success) {
-        this.state.completedCount++;
-        return true;
-      } else {
-        this.state.failedCount++;
-        return false;
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      await prisma.product.update({
-        where: { id: productId },
-        data: { status: 'error', errorMessage: message },
-      }).catch(() => null);
-      this.state.failedCount++;
-      console.error('[Queue] Unexpected error for product %s: %s', productId, message);
-      return false;
     }
   }
 

@@ -3,10 +3,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.errorHandler = errorHandler;
 exports.createError = createError;
 exports.notFound = notFound;
+const multer_1 = require("multer");
 function errorHandler(err, req, res, 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 next) {
-    const statusCode = err.statusCode ?? 500;
+    const statusCode = err instanceof multer_1.MulterError ? (err.code === 'LIMIT_FILE_SIZE' ? 413 : 400) : err.statusCode ?? 500;
     const message = err.message || 'Internal Server Error';
     console.error(`[Error] ${req.method} ${req.path} → ${statusCode}: ${message}`);
     if (err.stack && process.env.NODE_ENV === 'development') {

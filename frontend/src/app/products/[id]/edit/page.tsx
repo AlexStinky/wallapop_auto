@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { useForm, Controller } from 'react-hook-form';
+import { useForm, useWatch, Controller, type FieldErrors } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import {
@@ -11,7 +11,8 @@ import {
   X,
   Image as ImageIcon,
 } from 'lucide-react';
-import { getProduct, updateProduct, uploadImages, getImageUrl } from '@/lib/api';
+import { getApiErrorMessage, getProduct, updateProduct, uploadImages, getImageUrl } from '@/lib/api';
+import { usePhotoUrls } from '@/lib/use-photo-urls';
 import { cn } from '@/lib/utils';
 import toast from 'react-hot-toast';
 
@@ -108,6 +109,7 @@ export default function EditProductPage() {
   const params = useParams();
   const id = params.id as string;
 
+  const photoUrls = usePhotoUrls();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -120,7 +122,6 @@ export default function EditProductPage() {
     control,
     handleSubmit,
     reset,
-    watch,
     formState: { errors },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -146,9 +147,10 @@ export default function EditProductPage() {
     },
   });
 
-  const watchCategory = watch('category') || '';
-  const watchTitle = watch('title') || '';
-  const watchDescription = watch('description') || '';
+  const formValues = useWatch({ control });
+  const watchCategory = formValues.category || '';
+  const watchTitle = formValues.title || '';
+  const watchDescription = formValues.description || '';
 
   useEffect(() => {
     async function loadProduct() {
@@ -192,7 +194,7 @@ export default function EditProductPage() {
           originalPath: path,
         }));
         setImages(existingItems);
-      } catch (err) {
+      } catch {
         toast.error('Товар не знайдено');
         router.push('/products');
       } finally {
@@ -212,7 +214,7 @@ export default function EditProductPage() {
     const availableSlots = 10 - images.length;
     const toAdd = files.slice(0, availableSlots).map((file) => ({
       type: 'new' as const,
-      url: URL.createObjectURL(file),
+      url: photoUrls.create(file),
       file,
     }));
 
@@ -224,6 +226,7 @@ export default function EditProductPage() {
   };
 
   const handleRemovePhoto = (index: number) => {
+    photoUrls.release(images[index].url);
     setImages((prev) => prev.filter((_, i) => i !== index));
   };
 
@@ -288,8 +291,8 @@ export default function EditProductPage() {
       toast.success('Зміни успішно збережено!');
       router.refresh();
       router.push(`/products/${id}`);
-    } catch (err: any) {
-      const errMsg = err?.response?.data?.error?.message || err?.response?.data?.message || err?.message || 'Помилка при збереженні змін';
+    } catch (err) {
+      const errMsg = getApiErrorMessage(err, 'Помилка при збереженні змін');
       toast.error(errMsg);
       if (saveBtn) {
         saveBtn.disabled = false;
@@ -300,8 +303,8 @@ export default function EditProductPage() {
     }
   };
 
-  const onError = (formErrors: any) => {
-    const errorList = Object.values(formErrors) as any[];
+  const onError = (formErrors: FieldErrors<FormValues>) => {
+    const errorList = Object.values(formErrors);
     if (errorList.length > 0 && errorList[0]?.message) {
       toast.error(errorList[0].message);
     } else {
@@ -419,7 +422,7 @@ export default function EditProductPage() {
               <label
                 className={cn(
                   'flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all',
-                  watch('publishToWallapop')
+                  formValues.publishToWallapop
                     ? 'border-[#00C9A7] bg-[#00C9A7]/5'
                     : 'border-gray-200 bg-gray-50 opacity-60'
                 )}
@@ -441,7 +444,7 @@ export default function EditProductPage() {
               <label
                 className={cn(
                   'flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all',
-                  watch('publishToVinted')
+                  formValues.publishToVinted
                     ? 'border-[#09B1BA] bg-[#09B1BA]/5'
                     : 'border-gray-200 bg-gray-50 opacity-60'
                 )}
@@ -459,7 +462,7 @@ export default function EditProductPage() {
                 </div>
               </label>
             </div>
-            {!watch('publishToWallapop') && !watch('publishToVinted') && (
+            {!formValues.publishToWallapop && !formValues.publishToVinted && (
               <p className="mt-2 text-xs text-red-500 font-medium">
                 Виберіть хоча б один сайт для публікації!
               </p>

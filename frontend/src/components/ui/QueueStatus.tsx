@@ -12,21 +12,24 @@ export function QueueStatus() {
   const [loading, setLoading] = useState(true);
   const [toggling, setToggling] = useState(false);
 
-  const fetchQueue = async () => {
-    try {
-      const data = await getQueue();
-      setQueue(data);
-    } catch {
-      // Backend might not be running; silently fail
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    fetchQueue();
-    const interval = setInterval(fetchQueue, 5000);
-    return () => clearInterval(interval);
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    async function refresh() {
+      try {
+        const state = await getQueue();
+        if (!cancelled) setQueue(state);
+      } catch {
+        if (!cancelled) setQueue(null);
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+          timer = setTimeout(refresh, 5000);
+        }
+      }
+    }
+    void refresh();
+    return () => { cancelled = true; clearTimeout(timer); };
   }, []);
 
   const handleToggle = async () => {

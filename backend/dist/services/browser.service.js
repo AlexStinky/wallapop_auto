@@ -37,6 +37,7 @@ exports.browserService = void 0;
 const playwright_1 = require("playwright");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
+const uploads_1 = require("../uploads");
 const COOKIES_PATH = path.join(process.cwd(), '.session-cookies.json');
 const DESKTOP_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 class BrowserService {
@@ -264,6 +265,28 @@ class BrowserService {
         this.context = null;
         this.browser = null;
         console.log('[Browser] Closed');
+    }
+    clearCookies() {
+        let deleted = false;
+        const pathsToCheck = [
+            COOKIES_PATH,
+            path.resolve(__dirname, '../../.session-cookies.json'),
+            path.resolve(process.cwd(), '.session-cookies.json'),
+            path.resolve(process.cwd(), '../.session-cookies.json'),
+        ];
+        for (const p of pathsToCheck) {
+            try {
+                if (fs.existsSync(p)) {
+                    fs.unlinkSync(p);
+                    deleted = true;
+                    console.log('[Browser] Cleared Wallapop cookies file %s', p);
+                }
+            }
+            catch (err) {
+                console.warn('[Browser] Error deleting %s:', p, err);
+            }
+        }
+        return deleted;
     }
     // ─── Helpers ────────────────────────────────────────────────────────────────
     async ensurePage() {
@@ -1235,7 +1258,6 @@ class BrowserService {
             catch (_) {
                 images = [];
             }
-            const uploadDir = process.env.UPLOAD_DIR || './uploads';
             // ── Navigate to upload page ──────────────────────────────────────────
             await page.goto('https://es.wallapop.com/app/catalog/upload', {
                 waitUntil: 'domcontentloaded',
@@ -1302,18 +1324,7 @@ class BrowserService {
             await this.dismissPopups(page);
             // ── Step 3: Upload images ────────────────────────────────────────────
             if (images.length > 0) {
-                const absolutePaths = images
-                    .map((img) => {
-                    const basename = path.basename(img);
-                    const p = path.resolve(uploadDir, basename);
-                    if (fs.existsSync(p))
-                        return p;
-                    const direct = path.resolve(img);
-                    if (fs.existsSync(direct))
-                        return direct;
-                    return null;
-                })
-                    .filter(Boolean);
+                const absolutePaths = images.map(uploads_1.resolveUploadedPhoto).filter((p) => p !== null);
                 if (absolutePaths.length > 0) {
                     console.log('[Browser] Uploading %d images...', absolutePaths.length);
                     const fileInput = page.locator('input[type="file"]').first();

@@ -272,6 +272,36 @@ router.post('/vinted/open-browser', async (_req: Request, res: Response, next: N
   }
 });
 
+// DELETE /api/settings/cookies
+router.delete('/cookies', async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const deleted = browserService.clearCookies();
+    res.json({
+      success: true,
+      message: deleted
+        ? 'Кукі Wallapop успішно видалено. Сесія скинута.'
+        : 'Файл кукі Wallapop не знайдено або вже видалено.',
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/settings/vinted/cookies
+router.delete('/vinted/cookies', async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const deleted = vintedBrowserService.clearCookies();
+    res.json({
+      success: true,
+      message: deleted
+        ? 'Кукі Vinted успішно видалено. Застаріла або заблокована сесія скинута.'
+        : 'Файл кукі Vinted не знайдено або вже видалено.',
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 async function getOrCreateSettings() {

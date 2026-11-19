@@ -7,10 +7,12 @@ exports.vintedQueueService = exports.vintedQueueEvents = void 0;
 const events_1 = require("events");
 const prisma_1 = __importDefault(require("../db/prisma"));
 const vinted_service_1 = require("./vinted.service");
+const publication_state_1 = require("./publication-state");
 exports.vintedQueueEvents = new events_1.EventEmitter();
 exports.vintedQueueEvents.setMaxListeners(50);
 class VintedQueueService {
     constructor() {
+        this.adding = new Map();
         this.queue = [];
         this.isProcessing = false;
         this.currentProductId = null;
@@ -18,12 +20,6 @@ class VintedQueueService {
         this.failedCount = 0;
         this.lastPublishedAt = 0;
         this.MIN_INTERVAL_MS = 60000; // 60 секунд (1 хвилина) між публікаціями
-        // Автоматично відновлюємо незавершені публікації з БД при запуску
-        setTimeout(() => {
-            this.loadPendingFromDb().catch((err) => {
-                console.error('[VintedQueue] Error loading pending items from DB:', err);
-            });
-        }, 3000);
     }
     getState() {
         const elapsed = Date.now() - this.lastPublishedAt;
@@ -42,7 +38,6 @@ class VintedQueueService {
         const products = await prisma_1.default.product.findMany({
             where: {
                 vintedStatus: 'in_queue',
-                NOT: { vintedStatus: 'published' },
             },
             orderBy: { createdAt: 'asc' },
         });
@@ -61,25 +56,16 @@ class VintedQueueService {
         return this.queue.length;
     }
     async enqueue(productId) {
-        const product = await prisma_1.default.product.findUnique({ where: { id: productId } });
-        if (!product) {
-            throw new Error(`Product ${productId} not found`);
-        }
-        // Оновлюємо статус товару в БД
-        await prisma_1.default.product
-            .update({
-            where: { id: productId },
-            data: {
-                vintedStatus: 'in_queue',
-                status: product.status === 'published' ? 'published' : 'in_queue',
-                errorMessage: null,
-            },
-        })
-            .catch(() => null);
         let idx = this.queue.indexOf(productId);
         if (idx === -1) {
-            this.queue.push(productId);
-            idx = this.queue.length - 1;
+            let addition = this.adding.get(productId);
+            if (!addition) {
+                addition = (0, publication_state_1.setPublicationState)(productId, 'vinted', 'in_queue')
+                    .then(() => this.queue.push(productId) - 1)
+                    .finally(() => this.adding.delete(productId));
+                this.adding.set(productId, addition);
+            }
+            idx = await addition;
         }
         const position = idx + 1;
         const elapsed = Date.now() - this.lastPublishedAt;
@@ -127,7 +113,13 @@ class VintedQueueService {
                 }
                 // 2. Публікація товару
                 console.log('[VintedQueue] Starting publication for product %s (%d remaining in queue)', productId, this.queue.length - 1);
-                await this.processItem(productId);
+                try {
+                    await this.processItem(productId);
+                }
+                catch (error) {
+                    this.failedCount++;
+                    console.error('[VintedQueue] Failed to process', productId, error);
+                }
                 // 3. Фіксація часу завершення публікації
                 this.lastPublishedAt = Date.now();
                 // 4. Видалення обробленого товару з черги
@@ -144,30 +136,12 @@ class VintedQueueService {
         }
     }
     async processItem(productId) {
-        const product = await prisma_1.default.product.findUnique({ where: { id: productId } });
-        if (!product) {
-            console.warn('[VintedQueue] Product %s not found in DB, skipping', productId);
-            return false;
-        }
-        if (product.vintedStatus === 'published' && product.vintedUrl) {
-            console.log('[VintedQueue] Product %s is already published on Vinted, skipping', productId);
-            return true;
-        }
-        // Переводимо у стан публікації
-        await prisma_1.default.product
-            .update({
-            where: { id: productId },
-            data: {
-                vintedStatus: 'publishing',
-                status: 'publishing',
-                errorMessage: null,
-            },
-        })
-            .catch(() => null);
+        const product = await (0, publication_state_1.setPublicationState)(productId, 'vinted', 'publishing');
         this.broadcast();
-        const settings = await prisma_1.default.settings.findFirst();
-        const headless = settings?.headless ?? true;
+        let result;
         try {
+            const settings = await prisma_1.default.settings.findFirst();
+            const headless = settings?.headless ?? true;
             await vinted_service_1.vintedBrowserService.initialize(headless);
             const isVintedLoggedIn = await vinted_service_1.vintedBrowserService.isLoggedIn();
             if (!isVintedLoggedIn) {
@@ -175,62 +149,26 @@ class VintedQueueService {
                     await vinted_service_1.vintedBrowserService.login(settings.vintedEmail, settings.vintedPassword);
                 }
             }
-            const result = await vinted_service_1.vintedBrowserService.publishProduct(product);
-            if (result.success) {
-                this.completedCount++;
-                const currentProd = await prisma_1.default.product.findUnique({ where: { id: productId } });
-                const wallapopDone = !currentProd?.publishToWallapop || currentProd?.wallapopStatus === 'published';
-                await prisma_1.default.product
-                    .update({
-                    where: { id: productId },
-                    data: {
-                        vintedId: result.vintedId ?? null,
-                        vintedUrl: result.url ?? null,
-                        vintedStatus: 'published',
-                        status: wallapopDone ? 'published' : currentProd?.status,
-                        errorMessage: null,
-                    },
-                })
-                    .catch(() => null);
-                console.log('[VintedQueue] Product %s published successfully to Vinted: %s', productId, result.url);
-                return true;
-            }
-            else {
-                this.failedCount++;
-                const errMsg = `Vinted: ${result.error || 'Unknown error'}`;
-                await prisma_1.default.product
-                    .update({
-                    where: { id: productId },
-                    data: {
-                        vintedStatus: 'error',
-                        status: 'error',
-                        errorMessage: errMsg,
-                    },
-                })
-                    .catch(() => null);
-                console.warn('[VintedQueue] Product %s failed on Vinted: %s', productId, errMsg);
-                return false;
-            }
+            result = await vinted_service_1.vintedBrowserService.publishProduct(product);
         }
-        catch (err) {
-            this.failedCount++;
-            const msg = `Vinted: ${err?.message || String(err)}`;
-            await prisma_1.default.product
-                .update({
-                where: { id: productId },
-                data: {
-                    vintedStatus: 'error',
-                    status: 'error',
-                    errorMessage: msg,
-                },
-            })
-                .catch(() => null);
-            console.error('[VintedQueue] Product %s crashed on Vinted:', productId, err);
-            return false;
+        catch (error) {
+            result = { success: false, error: error instanceof Error ? error.message : String(error) };
         }
         finally {
-            await vinted_service_1.vintedBrowserService.close().catch(() => null);
+            await vinted_service_1.vintedBrowserService.close().catch(() => undefined);
         }
+        if (result.success) {
+            await (0, publication_state_1.setPublicationState)(productId, 'vinted', 'published', {
+                listingId: result.vintedId ?? null, url: result.url ?? null,
+            });
+            this.completedCount++;
+        }
+        else {
+            const message = 'Vinted: ' + (result.error || 'Unknown error');
+            await (0, publication_state_1.setPublicationState)(productId, 'vinted', 'error', { errorMessage: message });
+            this.failedCount++;
+        }
+        return result.success;
     }
     sleep(ms) {
         return new Promise((resolve) => setTimeout(resolve, ms));

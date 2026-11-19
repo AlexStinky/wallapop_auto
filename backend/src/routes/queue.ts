@@ -71,7 +71,6 @@ router.get('/status', (req: Request, res: Response) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
-  res.setHeader('Access-Control-Allow-Origin', process.env.FRONTEND_URL || '*');
   res.flushHeaders();
 
   // Send initial state immediately

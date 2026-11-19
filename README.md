@@ -26,7 +26,7 @@ wallapop/
 
 ## 🗄️ База даних: MongoDB
 
-Система використовує **MongoDB** (через Prisma ORM).
+Система використовує **MongoDB** через Prisma ORM. Для запису даних потрібен replica set, локально достатньо одного вузла.
 
 ### Моделі (`schema.prisma`):
 - `Product`:

@@ -1,5 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 
+import { MulterError } from 'multer';
+
 export interface AppError extends Error {
   statusCode?: number;
   isOperational?: boolean;
@@ -12,7 +14,7 @@ export function errorHandler(
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   next: NextFunction
 ): void {
-  const statusCode = err.statusCode ?? 500;
+  const statusCode = err instanceof MulterError ? (err.code === 'LIMIT_FILE_SIZE' ? 413 : 400) : err.statusCode ?? 500;
   const message = err.message || 'Internal Server Error';
 
   console.error(`[Error] ${req.method} ${req.path} → ${statusCode}: ${message}`);

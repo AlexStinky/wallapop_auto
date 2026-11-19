@@ -1,10 +1,7 @@
 import type { Metadata, Viewport } from 'next';
-import { Inter } from 'next/font/google';
 import { Toaster } from 'react-hot-toast';
 import { BottomNav } from '@/components/ui/BottomNav';
 import './globals.css';
-
-const inter = Inter({ subsets: ['latin', 'cyrillic'] });
 
 export const metadata: Metadata = {
   title: 'Wallapop Автопублікатор',
@@ -14,8 +11,6 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
 };
 
 export default function RootLayout({
@@ -25,7 +20,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="uk">
-      <body className={`${inter.className} bg-[#F8F9FA] antialiased`}>
+      <body className="bg-[#F8F9FA] antialiased">
         <div className="relative mx-auto min-h-screen w-full max-w-[480px] bg-[#F8F9FA]">
           <main className="pb-24 pt-0">{children}</main>
           <BottomNav />

@@ -8,10 +8,14 @@ Node.js/Express + Playwright backend for automated Wallapop product publishing.
 
 - Node.js 18+
 - npm 9+
-- MongoDB 6+ (local service, Docker, or MongoDB Atlas cluster)
+- MongoDB 6+ configured as a replica set (including a single-node replica set or MongoDB Atlas)
 - (VPS) Debian/Ubuntu recommended for Playwright
 
 ---
+
+## Integration tests
+
+Run `npm test` with a local MongoDB replica set on port 27017. Set `TEST_MONGODB_URL` to select another test server. The suite creates and removes a uniquely named database and replaces marketplace calls with local test doubles.
 
 ## Local Setup
 

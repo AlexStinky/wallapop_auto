@@ -16,24 +16,12 @@ echo   НАСТРОЙКА СЕТИ И БРАНДМАУЭРА ДЛЯ ДОСТУП
 echo ========================================================
 echo.
 
-echo [1/4] Переключение активных сетевых подключений в Частную сеть (Private)...
-powershell -NoProfile -Command "Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private -ErrorAction SilentlyContinue"
-
-echo [2/4] Открытие порта 3000 (Frontend)...
+echo Разрешение доступа к интерфейсу из локальной подсети...
 netsh advfirewall firewall delete rule name="Wallapop Port 3000" >nul 2>&1
-netsh advfirewall firewall add rule name="Wallapop Port 3000" dir=in action=allow protocol=TCP localport=3000 profile=any enable=yes >nul 2>&1
-
-echo [3/4] Открытие порта 3001 (Backend)...
 netsh advfirewall firewall delete rule name="Wallapop Port 3001" >nul 2>&1
-netsh advfirewall firewall add rule name="Wallapop Port 3001" dir=in action=allow protocol=TCP localport=3001 profile=any enable=yes >nul 2>&1
-
-echo [4/4] Разрешение входящих подключений для Node.js...
 netsh advfirewall firewall delete rule name="NodeJS Wallapop" >nul 2>&1
-for /f "delims=" %%i in ('where node 2^>nul') do (
-    netsh advfirewall firewall add rule name="NodeJS Wallapop" dir=in action=allow program="%%i" profile=any enable=yes >nul 2>&1
-)
+netsh advfirewall firewall add rule name="Wallapop Port 3000" dir=in action=allow protocol=TCP localport=3000 remoteip=localsubnet profile=private enable=yes || exit /b 1
 
-:: Определение локального IP-адреса
 set LOCAL_IP=
 for /f "delims=" %%a in ('powershell -NoProfile -Command "(Get-NetIPConfiguration | Where-Object { $_.IPv4DefaultGateway -ne $null } | Select-Object -ExpandProperty IPv4Address | Select-Object -ExpandProperty IPAddress -First 1)"') do set LOCAL_IP=%%a
 if "%LOCAL_IP%"=="" (
@@ -42,8 +30,7 @@ if "%LOCAL_IP%"=="" (
 
 echo.
 echo ========================================================
-echo   ГОТОВО! Порты 3000 и 3001 открыты в брандмауэре Windows.
-echo   Сеть успешно переведена в Частную (Private).
+echo   ГОТОВО! Порт 3000 открыт для локальной подсети в частной сети.
 echo.
 if not "%LOCAL_IP%"=="" (
     echo   ССЫЛКА ДЛЯ ВХОДА С ТЕЛЕФОНА:

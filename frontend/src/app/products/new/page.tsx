@@ -2,17 +2,17 @@
 
 import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { useForm, Controller } from 'react-hook-form';
+import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import {
   ArrowLeft,
-  Sparkles,
   ChevronDown,
   X,
   Image as ImageIcon,
 } from 'lucide-react';
-import { createProduct, uploadImages } from '@/lib/api';
+import { getApiErrorMessage, createProduct, uploadImages } from '@/lib/api';
+import { usePhotoUrls } from '@/lib/use-photo-urls';
 import { cn } from '@/lib/utils';
 import toast from 'react-hot-toast';
 
@@ -101,8 +101,9 @@ const weightOptions = [
 
 export default function NewProductPage() {
   const router = useRouter();
+  const photoUrls = usePhotoUrls();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const submitting = useRef(false);
   const [showExtraFields, setShowExtraFields] = useState(false);
   const [showVintedFields, setShowVintedFields] = useState(false);
 
@@ -111,7 +112,6 @@ export default function NewProductPage() {
     control,
     handleSubmit,
     setValue,
-    watch,
     formState: { errors },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -140,10 +140,11 @@ export default function NewProductPage() {
     },
   });
 
-  const selectedImages = watch('images') || [];
-  const watchCategory = watch('category') || '';
-  const watchTitle = watch('title') || '';
-  const watchDescription = watch('description') || '';
+  const formValues = useWatch({ control });
+  const selectedImages = formValues.images || [];
+  const watchCategory = formValues.category || '';
+  const watchTitle = formValues.title || '';
+  const watchDescription = formValues.description || '';
 
   // Local object URLs for photo preview
   const [previewUrls, setPreviewUrls] = useState<string[]>([]);
@@ -155,8 +156,8 @@ export default function NewProductPage() {
     const combined = [...selectedImages, ...files].slice(0, 10);
     setValue('images', combined, { shouldValidate: true });
 
-    const urls = combined.map((f) => URL.createObjectURL(f));
-    setPreviewUrls(urls);
+    const added = combined.slice(selectedImages.length).map(file => photoUrls.create(file));
+    setPreviewUrls(previous => [...previous, ...added]);
 
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -166,15 +167,22 @@ export default function NewProductPage() {
   const handleRemovePhoto = (index: number) => {
     const updated = selectedImages.filter((_, i) => i !== index);
     setValue('images', updated, { shouldValidate: true });
+    photoUrls.release(previewUrls[index]);
     setPreviewUrls(previewUrls.filter((_, i) => i !== index));
   };
 
-  const onSubmit = async (values: FormValues) => {
-    const mode = (typeof window !== 'undefined' && (window as any).__productSubmitMode === 'publish_now')
+  const onSubmit = async (values: FormValues, event?: React.BaseSyntheticEvent) => {
+    const submitter = (event?.nativeEvent as SubmitEvent | undefined)?.submitter;
+    if (!values.publishToWallapop && !values.publishToVinted) {
+      toast.error('Виберіть хоча б один сайт для публікації');
+      return;
+    }
+    const mode = submitter?.id === 'btn-publish-now'
       ? 'publish_now'
       : 'queue';
 
-    setSubmitting(true);
+    if (submitting.current) return;
+    submitting.current = true;
     const queueBtn = document.getElementById('btn-add-to-queue') as HTMLButtonElement | null;
     const publishBtn = document.getElementById('btn-publish-now') as HTMLButtonElement | null;
     if (queueBtn) queueBtn.disabled = true;
@@ -226,8 +234,8 @@ export default function NewProductPage() {
         toast.success('Товар додано до черги!');
       }
       router.push('/products');
-    } catch (err: any) {
-      const errMsg = err?.response?.data?.error?.message || err?.response?.data?.message || err?.message || 'Помилка при збереженні товару';
+    } catch (err) {
+      const errMsg = getApiErrorMessage(err, 'Помилка при збереженні товару');
       toast.error(errMsg);
       if (queueBtn) {
         queueBtn.disabled = false;
@@ -238,7 +246,7 @@ export default function NewProductPage() {
         publishBtn.textContent = 'Опублікувати зараз';
       }
     } finally {
-      setSubmitting(false);
+      submitting.current = false;
     }
   };
 
@@ -261,7 +269,7 @@ export default function NewProductPage() {
       {/* ── Main Content Container ────────────────────────────── */}
       <main className="mx-auto max-w-xl px-4 pt-3 pb-44">
         {/* ── Form ─────────────────────────────────────────────── */}
-        <form id="product-form" onSubmit={handleSubmit(onSubmit)} className="mt-5 space-y-3.5">
+        <form id="product-form" onSubmit={event => { void handleSubmit(onSubmit)(event); }} className="mt-5 space-y-3.5">
           <button id="product-form-hidden-submit" type="submit" className="hidden" />
           {/* Photos Row (matching screenshot) */}
           <div>
@@ -339,7 +347,7 @@ export default function NewProductPage() {
               <label
                 className={cn(
                   'flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all',
-                  watch('publishToWallapop')
+                  formValues.publishToWallapop
                     ? 'border-[#00C9A7] bg-[#00C9A7]/5'
                     : 'border-gray-200 bg-gray-50 opacity-60'
                 )}
@@ -361,7 +369,7 @@ export default function NewProductPage() {
               <label
                 className={cn(
                   'flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all',
-                  watch('publishToVinted')
+                  formValues.publishToVinted
                     ? 'border-[#09B1BA] bg-[#09B1BA]/5'
                     : 'border-gray-200 bg-gray-50 opacity-60'
                 )}
@@ -379,7 +387,7 @@ export default function NewProductPage() {
                 </div>
               </label>
             </div>
-            {!watch('publishToWallapop') && !watch('publishToVinted') && (
+            {!formValues.publishToWallapop && !formValues.publishToVinted && (
               <p className="mt-2 text-xs text-red-500 font-medium">
                 Виберіть хоча б один сайт для публікації!
               </p>
@@ -531,7 +539,7 @@ export default function NewProductPage() {
             <label className="block text-xs font-normal text-gray-500 mb-2.5">¿Cuánto pesa?*</label>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {weightOptions.map((w) => {
-                const currentWeight = watch('weight');
+                const currentWeight = formValues.weight;
                 const isSelected = currentWeight === w.value;
                 return (
                   <button

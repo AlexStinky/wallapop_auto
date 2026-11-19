@@ -3,12 +3,13 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { ArrowLeft, Edit, Send, Trash2, ExternalLink, AlertCircle, ChevronLeft, ChevronRight, RotateCcw, Clock } from 'lucide-react';
-import { Product, getProduct, publishProductNow, deleteProduct, getImageUrl, addProductToQueue } from '@/lib/api';
+import { getApiErrorMessage, Product, getProduct, deleteProduct, getImageUrl, addProductToQueue } from '@/lib/api';
 import { StatusBadge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { formatDate, getStatusLabel } from '@/lib/utils';
 import Link from 'next/link';
+import { usePublication } from '@/lib/use-publication';
 import toast from 'react-hot-toast';
 
 const conditionLabels: Record<string, string> = {
@@ -53,7 +54,8 @@ export default function ProductDetailPage() {
 
   const [product, setProduct] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
-  const [publishing, setPublishing] = useState(false);
+  const { publish, busy } = usePublication(setProduct, id);
+  const publishing = busy.includes(id);
   const [deleting, setDeleting] = useState(false);
   const [currentImage, setCurrentImage] = useState(0);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -73,64 +75,6 @@ export default function ProductDetailPage() {
     fetch();
   }, [id, router]);
 
-  const handlePublish = async (platform?: 'wallapop' | 'vinted' | 'both') => {
-    if (!product) return;
-    setPublishing(true);
-    try {
-      await publishProductNow(product.id, platform);
-      const targetLabel = platform === 'wallapop' ? 'на Wallapop' : platform === 'vinted' ? 'на Vinted' : '';
-      toast.success(`Публікацію ${targetLabel} запущено!`.trim());
-      const updated = await getProduct(id);
-      setProduct(updated);
-
-      // Poll until product finishes publishing
-      let attempts = 0;
-      const pollTimer = setInterval(async () => {
-        attempts++;
-        try {
-          const fresh = await getProduct(id);
-          setProduct(fresh);
-          const isDone = platform === 'wallapop'
-            ? fresh?.wallapopStatus !== 'publishing'
-            : platform === 'vinted'
-            ? fresh?.vintedStatus !== 'publishing'
-            : fresh?.status !== 'publishing';
-
-          if (fresh && isDone) {
-            clearInterval(pollTimer);
-            setPublishing(false);
-            if (platform === 'wallapop') {
-              if (fresh.wallapopStatus === 'published') {
-                toast.success('Товар успішно опубліковано на Wallapop!');
-              } else if (fresh.wallapopStatus === 'error') {
-                toast.error(fresh.errorMessage || 'Помилка публікації на Wallapop', { duration: 6000 });
-              }
-            } else if (platform === 'vinted') {
-              if (fresh.vintedStatus === 'published') {
-                toast.success('Товар успішно опубліковано на Vinted!');
-              } else if (fresh.vintedStatus === 'error') {
-                toast.error(fresh.errorMessage || 'Помилка публікації на Vinted', { duration: 6000 });
-              }
-            } else {
-              if (fresh.status === 'published') {
-                toast.success('Товар успішно опубліковано!');
-              } else if (fresh.status === 'error') {
-                toast.error(fresh.errorMessage || 'Помилка публікації', { duration: 6000 });
-              }
-            }
-          }
-        } catch (_) {}
-        if (attempts >= 60) {
-          clearInterval(pollTimer);
-          setPublishing(false);
-        }
-      }, 2000);
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error || 'Помилка при публікації');
-      setPublishing(false);
-    }
-  };
-
   const handleAddToQueue = async () => {
     if (!product) return;
     try {
@@ -138,8 +82,8 @@ export default function ProductDetailPage() {
       toast.success(res.message || 'Товар додано до черги Wallapop');
       const updated = await getProduct(id);
       setProduct(updated);
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error || 'Помилка додавання до черги');
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Помилка додавання до черги'));
     }
   };
 
@@ -353,7 +297,7 @@ export default function ProductDetailPage() {
               <Button
                 variant="primary"
                 size="lg"
-                onClick={() => handlePublish('both')}
+                onClick={() => publish(id, 'both')}
                 loading={publishing}
                 fullWidth
               >
@@ -364,7 +308,7 @@ export default function ProductDetailPage() {
               <Button
                 variant="primary"
                 size="lg"
-                onClick={() => handlePublish('both')}
+                onClick={() => publish(id, 'both')}
                 loading={publishing}
                 fullWidth
               >
@@ -399,7 +343,7 @@ export default function ProductDetailPage() {
             <button
               type="button"
               disabled={publishing || product.vintedStatus === 'in_queue' || product.vintedStatus === 'publishing'}
-              onClick={() => handlePublish('vinted')}
+              onClick={() => publish(id, 'vinted')}
               className="flex-1 rounded-xl border border-[#09B1BA] bg-[#09B1BA]/10 py-2.5 px-3 text-xs sm:text-sm font-semibold text-[#07858c] shadow-sm hover:bg-[#09B1BA]/20 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
               title={product.vintedStatus === 'in_queue' ? "В черзі Vinted (інтервал не частіше 1 хв)" : "Опублікувати на Vinted"}
             >
