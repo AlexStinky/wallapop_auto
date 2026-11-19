@@ -117,3 +117,146 @@ test('product API, publication queues and uploads', { timeout: 30000 }, async t 
     assert.equal((await db.product.findUniqueOrThrow({ where: { id: item.id } })).status, 'published');
   });
 });
+
+test('Vinted repairs skipped fields after form validation', { timeout: 20000 }, async t => {
+  const { chromium } = require('playwright');
+  const { VintedBrowserService } = require('../dist/services/vinted.service');
+  const browser = await chromium.launch({ channel: 'chrome' }).catch(() => chromium.launch()).catch(error => {
+    if (!String(error).includes("Executable doesn't exist")) throw error;
+    return null;
+  });
+  if (!browser) {
+    t.skip('Chromium is unavailable');
+    return;
+  }
+  t.after(() => browser.close());
+
+  async function publish(canSelectCategory) {
+    const page = await browser.newPage();
+    const service = new VintedBrowserService();
+    service.page = page;
+    t.mock.method(service, 'acceptCookies', async () => {});
+    t.mock.method(service, 'randomDelay', async () => {});
+    t.mock.method(page, 'waitForTimeout', async () => {});
+
+    await page.route('**/*', route => route.fulfill({
+      contentType: 'text/html; charset=utf-8',
+      body: new URL(route.request().url()).pathname === '/items/new' ? `
+        <form>
+          <input id="title">
+          <textarea id="description"></textarea>
+          <div>
+            <button type="button" data-testid="catalog-suggestion" aria-pressed="true">Ropa</button>
+          </div>
+          <ul><li>
+            <div class="m4PZBq_input-dropdown">
+              <label for="category">Categoría</label>
+              <div class="m4PZBq_input-dropdown__content">
+                <input id="category" name="category" data-testid="catalog-select-dropdown-input"
+                  readonly placeholder="Elige una categoría" value="">
+              </div>
+              <div id="category-note" class="m4PZBq_input-dropdown__note"></div>
+            </div>
+          </li></ul>
+          <div id="format-field" hidden>
+            <input data-testid="format-dropdown-input" id="format" readonly>
+            <div id="format-note"></div>
+          </div>
+          <div><input id="price"><div id="price-note"></div></div>
+          <input id="untouched" value="Original">
+          <button type="button" data-testid="upload-form-save-button">Subir</button>
+        </form>
+        <div id="menu" data-testid="catalog-select-dropdown-content" hidden></div>
+        <script>
+          const byId = id => document.getElementById(id);
+          const category = byId('category');
+          const format = byId('format');
+          const price = byId('price');
+          const menu = byId('menu');
+          let submissions = 0;
+          const warning = (id, message) => {
+            byId(id).innerHTML = message
+              ? '<div class="web_ui__Validation__validation web_ui__Validation__warning" role="alert">' + message + '</div>'
+              : '';
+          };
+
+          category.onclick = () => {
+            menu.hidden = false;
+            menu.innerHTML = submissions && ${canSelectCategory}
+              ? '<input type="search" placeholder="Buscar"><button tabindex="0">Hogar</button>'
+              : '<p>Sin opciones</p>';
+            const root = menu.querySelector('button');
+            if (!root) return;
+            root.onclick = () => {
+              category.value = root.textContent;
+              menu.innerHTML = '<button role="radio">Otro</button><button role="radio">Decoración</button>';
+              for (const leaf of menu.querySelectorAll('button')) {
+                leaf.onclick = () => {
+                  category.value = leaf.textContent;
+                  warning('category-note', '');
+                  byId('format-field').hidden = false;
+                  menu.hidden = true;
+                };
+              }
+            };
+          };
+          format.onclick = () => {
+            menu.hidden = false;
+            menu.setAttribute('role', 'listbox');
+            menu.innerHTML = '<button role="option">Mediano</button>';
+            menu.querySelector('button').onclick = () => {
+              format.value = 'Mediano';
+              warning('format-note', '');
+              menu.hidden = true;
+            };
+          };
+          document.addEventListener('keydown', event => {
+            if (event.key === 'Escape') menu.hidden = true;
+          });
+          document.querySelector('[data-testid="upload-form-save-button"]').onclick = () => {
+            submissions++;
+            if (!category.value) {
+              warning('category-note', 'Elige una subcategoría');
+            } else if (!format.value) {
+              price.value = '';
+              warning('format-note', 'Selecciona un formato');
+              warning('price-note', 'Introduce un precio');
+            }
+            sessionStorage.setItem('form', JSON.stringify({
+              submissions, category: category.value, format: format.value,
+              price: price.value, untouched: byId('untouched').value,
+            }));
+            if (category.value && format.value && price.value) location.assign('/items/12345-marco');
+          };
+        </script>
+      ` : '<p>Published</p>',
+    }));
+
+    const result = await service.publishProduct({
+      id: 'validation-test',
+      title: 'Marco',
+      description: 'Marco de madera',
+      price: 15.5,
+      category: 'Hogar',
+      subcategory: 'Decoracion',
+      images: '[]',
+    });
+    const form = await page.evaluate(() => JSON.parse(sessionStorage.getItem('form')));
+    return { result, form };
+  }
+
+  const recovered = await publish(true);
+  assert.deepEqual(recovered.result, {
+    success: true,
+    vintedId: '12345',
+    url: 'https://www.vinted.es/items/12345-marco',
+  });
+  assert.deepEqual(recovered.form, {
+    submissions: 3, category: 'Decoración', format: 'Mediano', price: '15,5', untouched: 'Original',
+  });
+
+  const blocked = await publish(false);
+  assert.equal(blocked.result.success, false);
+  assert.match(blocked.result.error, /Elige una subcategoría/);
+  assert.equal(blocked.form.submissions, 1);
+});
