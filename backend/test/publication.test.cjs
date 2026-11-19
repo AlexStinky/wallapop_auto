@@ -118,9 +118,8 @@ test('product API, publication queues and uploads', { timeout: 30000 }, async t 
   });
 });
 
-test('Vinted repairs skipped fields after form validation', { timeout: 20000 }, async t => {
+async function launchVintedBrowser(t) {
   const { chromium } = require('playwright');
-  const { VintedBrowserService } = require('../dist/services/vinted.service');
   const browser = await chromium.launch({ channel: 'chrome' }).catch(() => chromium.launch()).catch(error => {
     if (!String(error).includes("Executable doesn't exist")) throw error;
     return null;
@@ -130,8 +129,15 @@ test('Vinted repairs skipped fields after form validation', { timeout: 20000 }, 
     return;
   }
   t.after(() => browser.close());
+  return browser;
+}
 
-  async function publish(canSelectCategory) {
+test('Vinted repairs skipped fields after form validation', { timeout: 30000 }, async t => {
+  const { VintedBrowserService } = require('../dist/services/vinted.service');
+  const browser = await launchVintedBrowser(t);
+  if (!browser) return;
+
+  async function publish(canSelectCategory, brandAvailable = true) {
     const page = await browser.newPage();
     const service = new VintedBrowserService();
     service.page = page;
@@ -143,6 +149,7 @@ test('Vinted repairs skipped fields after form validation', { timeout: 20000 }, 
       contentType: 'text/html; charset=utf-8',
       body: new URL(route.request().url()).pathname === '/items/new' ? `
         <form>
+          <input id="site-search" placeholder="Buscar artículos">
           <input id="title">
           <textarea id="description"></textarea>
           <div>
@@ -162,17 +169,33 @@ test('Vinted repairs skipped fields after form validation', { timeout: 20000 }, 
             <input data-testid="format-dropdown-input" id="format" readonly>
             <div id="format-note"></div>
           </div>
+          <input data-testid="brand-select-dropdown-input" hidden>
+          <div id="brand-field" hidden>
+            <input id="brand" data-testid="brand-select-dropdown-input" aria-controls="brand-menu" readonly>
+            <div id="brand-note"></div>
+          </div>
           <div><input id="price"><div id="price-note"></div></div>
           <input id="untouched" value="Original">
           <button type="button" data-testid="upload-form-save-button">Subir</button>
         </form>
         <div id="menu" data-testid="catalog-select-dropdown-content" hidden></div>
+        <div id="brand-menu" data-radix-popper-content-wrapper hidden>
+          <input type="search" placeholder="Buscar una marca" hidden>
+          <input type="search" readonly>
+          <input id="brand-search" type="search" placeholder="Buscar una marca" hidden>
+          <button role="option" hidden>Winfaith</button>
+          <div id="brand-results" role="listbox"></div>
+        </div>
         <script>
           const byId = id => document.getElementById(id);
           const category = byId('category');
           const format = byId('format');
           const price = byId('price');
           const menu = byId('menu');
+          const brand = byId('brand');
+          const brandMenu = byId('brand-menu');
+          const brandSearch = byId('brand-search');
+          const brandSearches = [];
           let submissions = 0;
           const warning = (id, message) => {
             byId(id).innerHTML = message
@@ -210,6 +233,32 @@ test('Vinted repairs skipped fields after form validation', { timeout: 20000 }, 
               menu.hidden = true;
             };
           };
+          brand.onclick = () => {
+            brandMenu.hidden = false;
+            setTimeout(() => { brandSearch.hidden = false; }, 75);
+          };
+          brandSearch.oninput = () => {
+            const query = brandSearch.value;
+            brandSearches.push(query);
+            const results = byId('brand-results');
+            results.replaceChildren();
+            setTimeout(() => {
+              const labels = query === 'Sin marca' ? ['Sin marca']
+                : query === 'Winfaith' && ${brandAvailable} ? ['Winfaith Plus', 'Winfaith'] : [];
+              for (const label of labels) {
+                const result = document.createElement('button');
+                result.setAttribute('role', 'option');
+                if (label === labels[0]) result.setAttribute('aria-selected', 'true');
+                result.textContent = label;
+                result.onclick = () => {
+                  brand.value = label;
+                  warning('brand-note', '');
+                  brandMenu.hidden = true;
+                };
+                results.append(result);
+              }
+            }, 75);
+          };
           document.addEventListener('keydown', event => {
             if (event.key === 'Escape') menu.hidden = true;
           });
@@ -217,16 +266,19 @@ test('Vinted repairs skipped fields after form validation', { timeout: 20000 }, 
             submissions++;
             if (!category.value) {
               warning('category-note', 'Elige una subcategoría');
-            } else if (!format.value) {
+            } else if (!format.value || !brand.value) {
               price.value = '';
+              byId('brand-field').hidden = false;
+              warning('brand-note', 'Selecciona una marca');
               warning('format-note', 'Selecciona un formato');
               warning('price-note', 'Introduce un precio');
             }
             sessionStorage.setItem('form', JSON.stringify({
               submissions, category: category.value, format: format.value,
               price: price.value, untouched: byId('untouched').value,
+              brand: brand.value, brandSearches, siteSearch: byId('site-search').value,
             }));
-            if (category.value && format.value && price.value) location.assign('/items/12345-marco');
+            if (category.value && format.value && price.value && brand.value) location.assign('/items/12345-marco');
           };
         </script>
       ` : '<p>Published</p>',
@@ -239,6 +291,7 @@ test('Vinted repairs skipped fields after form validation', { timeout: 20000 }, 
       price: 15.5,
       category: 'Hogar',
       subcategory: 'Decoracion',
+      brand: 'Winfaith',
       images: '[]',
     });
     const form = await page.evaluate(() => JSON.parse(sessionStorage.getItem('form')));
@@ -253,10 +306,197 @@ test('Vinted repairs skipped fields after form validation', { timeout: 20000 }, 
   });
   assert.deepEqual(recovered.form, {
     submissions: 3, category: 'Decoración', format: 'Mediano', price: '15,5', untouched: 'Original',
+    brand: 'Winfaith', brandSearches: ['Winfaith'], siteSearch: '',
   });
+
+  const unbranded = await publish(true, false);
+  assert.equal(unbranded.result.success, true);
+  assert.equal(unbranded.form.brand, 'Sin marca');
+  assert.deepEqual(unbranded.form.brandSearches, ['Winfaith', 'Sin marca']);
+  assert.equal(unbranded.form.siteSearch, '');
 
   const blocked = await publish(false);
   assert.equal(blocked.result.success, false);
   assert.match(blocked.result.error, /Elige una subcategoría/);
   assert.equal(blocked.form.submissions, 1);
+});
+
+test('Vinted closes Estado and moves on to the remaining details', { timeout: 20000 }, async t => {
+  const { VintedBrowserService } = require('../dist/services/vinted.service');
+  const browser = await launchVintedBrowser(t);
+  if (!browser) return;
+
+  const fields = [
+    ['brand', 'brand-select-dropdown-input', 'Marca', 'Genérica', 'Winfaith'],
+    ['condition', 'category-condition-single-list-input', 'Estado', 'Nuevo con etiquetas', 'Nuevo sin etiquetas'],
+    ['color', 'color-select-dropdown-input', 'Color', 'Negro', 'Plata'],
+    ['material', 'category-material-multi-list-input', 'Material', 'Madera', 'Acero'],
+  ];
+  for (const blockedCondition of [false, true]) {
+    const page = await browser.newPage();
+    await page.setContent(`
+      <style>
+        [hidden] { display: none; }
+        #backdrop { position: fixed; inset: 0; z-index: 1; }
+        .choices { position: relative; z-index: 2; background: white; }
+        .blocked { pointer-events: none; }
+      </style>
+      <input hidden data-testid="category-condition-single-list-input">
+      <ul>
+        ${fields.map(([name, testId, label, first, second]) => `
+          <li>
+            <div class="m4PZBq_input-dropdown">
+              <label for="${name}" class="m4PZBq_input-dropdown__title">${label}</label>
+              <div class="m4PZBq_input-dropdown__content">
+                <input id="${name}" name="${name}" data-testid="${testId}" readonly>
+              </div>
+              <div class="m4PZBq_input-dropdown__note"></div>
+              <div hidden class="choices ${name === 'condition' && blockedCondition ? 'blocked' : ''}">
+                ${name === 'brand' ? '<input type="search">' : ''}
+                <button role="option" disabled>No disponible</button>
+                <button role="option">${first}</button>
+                <button role="option">${second}</button>
+              </div>
+            </div>
+          </li>
+        `).join('')}
+      </ul>
+      <div id="backdrop" hidden></div>
+      <script>
+        const backdrop = document.querySelector('#backdrop');
+        let openMenu;
+        for (const field of document.querySelectorAll('input[readonly]')) {
+          const menu = field.closest('li').querySelector('.choices');
+          field.onclick = () => {
+            openMenu = menu;
+            menu.hidden = false;
+            backdrop.hidden = false;
+          };
+          for (const option of menu.querySelectorAll('button:not(:disabled)')) {
+            option.onclick = () => {
+              field.value = option.textContent;
+              option.setAttribute('aria-selected', 'true');
+            };
+          }
+        }
+        document.addEventListener('keydown', event => {
+          if (event.key !== 'Escape' || !openMenu) return;
+          openMenu.hidden = true;
+          backdrop.hidden = true;
+          openMenu = null;
+        });
+      </script>
+    `);
+    const service = new VintedBrowserService();
+    service.page = page;
+    await service.fillProductDetails({ brand: 'Winfaith', color: 'Plata', material: 'Acero' });
+
+    const values = await page.locator('li input[readonly]').evaluateAll(fields => fields.map(field => field.value));
+    assert.deepEqual(values, ['Winfaith', blockedCondition ? '' : 'Nuevo sin etiquetas', 'Plata', 'Acero']);
+    assert.equal(await page.locator('#backdrop').isVisible(), false);
+    await page.close();
+  }
+});
+
+test('Vinted preserves choices already made by the form', { timeout: 15000 }, async t => {
+  const { VintedBrowserService } = require('../dist/services/vinted.service');
+  const browser = await launchVintedBrowser(t);
+  if (!browser) return;
+
+  const page = await browser.newPage();
+  await page.setContent(`
+    <div>
+      <input id="category" readonly value="Hogar">
+      <div role="alert">Revisa la categoría</div>
+    </div>
+    <input id="brand" readonly value="Marca del sitio">
+    <select id="condition">
+      <option value="">Selecciona un estado</option>
+      <option value="new" selected>Nuevo con etiquetas</option>
+      <option value="good">En muy buen estado</option>
+    </select>
+    <ul>
+      <li>
+        <input id="size" readonly placeholder="Elige la talla">
+        <div id="size-menu" class="dropdown__content" hidden>
+          <button role="radio" aria-checked="true">S</button>
+          <button id="other-size" role="radio" aria-label="L">L</button>
+        </div>
+      </li>
+      <li>
+        <input id="color" readonly placeholder="Selecciona un color">
+        <div id="color-menu" hidden>
+          <label><input type="checkbox" checked> Plata</label>
+          <button id="other-color" role="checkbox">Negro</button>
+        </div>
+      </li>
+    </ul>
+    <button id="material" data-value="Madera">Madera</button>
+    <div>
+      <input id="format" readonly value="Mediano">
+      <div role="alert">Selecciona un formato</div>
+    </div>
+    <label id="package-size-1" for="package_type_selector_1">
+      Recomendado
+      <input type="radio" id="package_type_selector_1" name="package_size">
+    </label>
+    <label id="package-size-2" for="package_type_selector_2">
+      Mediano
+      <input type="radio" id="package_type_selector_2" name="package_size" checked>
+    </label>
+    <div role="alert">Selecciona el tamaño del paquete</div>
+    <script>
+      window.replacements = [];
+      for (const id of ['category', 'brand', 'material', 'format', 'other-color', 'other-size', 'package-size-1']) {
+        document.getElementById(id).onclick = () => replacements.push(id);
+      }
+      for (const id of ['size', 'color']) {
+        document.getElementById(id).onclick = () => document.getElementById(id + '-menu').hidden = false;
+      }
+      document.addEventListener('keydown', event => {
+        if (event.key === 'Escape') {
+          document.getElementById('size-menu').hidden = true;
+          document.getElementById('color-menu').hidden = true;
+        }
+      });
+    </script>
+  `);
+  const service = new VintedBrowserService();
+  service.page = page;
+  const product = { category: 'Mujer', brand: 'Otra marca', vintedSize: 'L', color: 'Negro', material: 'Acero' };
+  assert.equal(await service.selectCategory(product.category), true);
+  await service.fillProductDetails(product);
+  assert.equal(await service.handlePackageSize(), false);
+  assert.equal(await service.repairValidationErrors(product, page.getByRole('alert'), new Set()), false);
+
+  assert.equal(await page.locator('#condition').inputValue(), 'new');
+  assert.equal(await page.locator('#package_type_selector_2').isChecked(), true);
+  assert.equal(await page.locator('#color-menu input').isChecked(), true);
+  assert.equal(await page.locator('#size-menu [aria-checked]').getAttribute('aria-checked'), 'true');
+  assert.deepEqual(await page.evaluate(() => window.replacements), []);
+
+  await page.setContent(`
+    <input id="category" readonly value="Hogar">
+    <div id="warning" role="alert">Elige una subcategoría</div>
+    <button aria-pressed="true" data-testid="category-suggestion">Mujer</button>
+    <div data-testid="catalog-select-dropdown-content" hidden id="category-menu">
+      <button>Mujer</button>
+      <button id="home">Hogar</button>
+    </div>
+    <script>
+      const category = document.querySelector('#category');
+      const menu = document.querySelector('#category-menu');
+      category.onclick = () => { menu.hidden = false; };
+      document.querySelector('#home').onclick = () => {
+        menu.innerHTML = '<button role="radio">Decoración</button>';
+        menu.firstChild.onclick = () => {
+          category.value = 'Hogar > Decoración';
+          document.querySelector('#warning').remove();
+          menu.hidden = true;
+        };
+      };
+    </script>
+  `);
+  assert.equal(await service.selectCategory('Mujer', 'Decoración', true), true);
+  assert.equal(await page.locator('#category').inputValue(), 'Hogar > Decoración');
 });

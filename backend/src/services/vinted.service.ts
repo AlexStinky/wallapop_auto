@@ -18,6 +18,11 @@ const DESCRIPTION_INPUT = 'textarea[data-testid="description--input"], #descript
 const PRICE_INPUT = 'input[data-testid="price-input--input"], #price, input[name="price"]';
 const DROPDOWN_CONTENT = '[data-radix-popper-content-wrapper], [role="listbox"], [role="menu"], [class*="input-dropdown__popover"], [class*="input-dropdown__dropdown"]';
 const DROPDOWN_OPTION = '[role="radio"], [role="checkbox"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"], input[type="radio"], input[type="checkbox"]';
+const DETAIL_ROLE = '[role="radio"], [role="checkbox"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"], [role="menuitem"]';
+const DETAIL_OPTION = DETAIL_ROLE + ', label:has(input:is([type="radio"], [type="checkbox"]):enabled), input:is([type="radio"], [type="checkbox"]):not(label input)';
+const CHECKED_CHOICE = '[aria-checked="true"], [aria-selected="true"], [data-state="checked"], [data-state="selected"], [data-selected="true"]';
+const CHECKED_INPUT = 'input:is([type="radio"], [type="checkbox"]):checked';
+const DETAIL_TIMEOUT = 2500;
 const CATEGORY_MENU = '[data-testid="catalog-select-dropdown-content"], [data-testid="catalog-select-dropdown-list"], [data-testid^="catalog"][data-testid$="-dropdown-content"], '
   + DROPDOWN_CONTENT + ', [role="dialog"]:not(:has(:is(' + CATEGORY_INPUT + ')))';
 const CATEGORY_LEAF = '[role="radio"], [role="menuitemradio"], [role="option"], input[type="radio"], label:has(input[type="radio"])';
@@ -25,10 +30,29 @@ const FIELD_CONTROL = 'input:not([type="hidden"], [type="checkbox"], [type="radi
 const DETAIL_INPUTS = {
   brand: '#brand, [data-testid="brand-select-dropdown-input"]',
   size: '#size, [data-testid*="category-size"][data-testid$="-input"]',
-  condition: '#condition, [data-testid*="category-condition"][data-testid$="-input"]',
-  color: '#color, [data-testid="color-select-dropdown-input"]',
+  condition: '#condition, select[name="condition"], input[readonly][name="condition"], [data-testid*="condition"][data-testid$="-input"]',
+  color: '#color, [data-testid="color-select-dropdown-input"], [data-testid*="category-color"][data-testid$="-input"]',
   material: '#material, [data-testid*="category-material"][data-testid$="-input"]',
 };
+
+function hasDropdownValue(element: Node): boolean {
+  if (!(element instanceof HTMLElement)) return false;
+  const prompt = /^(?:elige|elegir|selecciona[rs]?|seleccione|escoge|choose|select)(?:\s|$)/i;
+  if (element instanceof HTMLSelectElement) {
+    return Array.from(element.selectedOptions).some(option => option.value.trim() && !prompt.test(option.label.trim()));
+  }
+  if (element instanceof HTMLInputElement) {
+    return Boolean(element.value.trim() && element.value.trim() !== element.getAttribute('placeholder')?.trim());
+  }
+  if (element.hasAttribute('data-placeholder') && element.getAttribute('data-placeholder') !== 'false') return false;
+  const value = element.getAttribute('aria-valuetext') || element.getAttribute('data-value');
+  if (value?.trim()) return true;
+  const text = element.textContent?.trim();
+  if (!text || prompt.test(text)) return false;
+  const labels = 'labels' in element ? (element as HTMLButtonElement).labels : null;
+  return !Array.from(labels || []).some(label => label.textContent?.trim() === text)
+    && !/^(?:marca|brand|estado|condition|talla|medidas|size|colou?r|material|categoría|category|formato|format)$/i.test(text);
+}
 
 export class VintedBrowserService {
   private browser: Browser | null = null;
@@ -580,8 +604,7 @@ export class VintedBrowserService {
         { timeout: 10000 }
       );
       if (priceInput) {
-        await priceInput.click();
-        await priceInput.fill(priceToUse.toString().replace('.', ','));
+        await priceInput.fill(priceToUse.toString().replace('.', ','), { timeout: 5000 });
         await this.randomDelay(400, 700);
       }
 
@@ -727,13 +750,13 @@ export class VintedBrowserService {
     };
     const details: Record<keyof typeof DETAIL_INPUTS, () => Promise<void>> = {
       brand: async () => {
-        await this.selectBrand(product.brand);
+        await this.selectDetailOption('brand', product.brand);
         await this.dismissAuthenticityModal();
       },
       size: () => this.selectSize(product.vintedSize),
-      condition: () => this.selectCondition(product.condition),
-      color: () => this.selectColor(product.color),
-      material: () => this.selectMaterial(product.material),
+      condition: () => this.selectDetailOption('condition'),
+      color: () => this.selectDetailOption('color', product.color),
+      material: () => this.selectDetailOption('material', product.material),
     };
     const selectors = Object.entries({
       category: CATEGORY_INPUT,
@@ -826,12 +849,16 @@ export class VintedBrowserService {
   }
 
   private async fillProductDetails(product: Product): Promise<void> {
-    await this.selectBrand(product.brand);
+    if (!this.page) return;
+    const detailInputs = Object.values(DETAIL_INPUTS).join(', ');
+    await this.page.locator(':is(' + detailInputs + '):visible').first()
+      .waitFor({ state: 'visible', timeout: 1500 }).catch(() => null);
+    await this.selectDetailOption('brand', product.brand);
     await this.dismissAuthenticityModal();
     await this.selectSize(product.vintedSize);
-    await this.selectCondition(product.condition);
-    await this.selectColor(product.color);
-    await this.selectMaterial(product.material);
+    await this.selectDetailOption('condition');
+    await this.selectDetailOption('color', product.color);
+    await this.selectDetailOption('material', product.material);
     await this.fillRemainingDynamicFields();
   }
 
@@ -850,32 +877,43 @@ export class VintedBrowserService {
     const target = (subcategoryName?.trim().toLowerCase() === 'auto' ? '' : subcategoryName?.trim()) || categoryName?.trim() || '';
     const category = normalize(categoryName || '');
     const query = normalize(target);
+    let opened = false;
 
     try {
       await trigger.waitFor({ state: 'visible', timeout: 5000 });
       const initial = await readSelection();
+      const hasCategoryLabel = ({ value, placeholder }: typeof initial) =>
+        value && !placeholder && !CATEGORY_WARNING.test(value) && !/^(?:sub)?categor(?:ía|ia|y)$/i.test(value);
       const isSelected = async () => {
-        const { value, placeholder } = await readSelection();
-        return Boolean(value && !placeholder && !CATEGORY_WARNING.test(value) && !/^(?:sub)?categor(?:ía|ia|y)$/i.test(value)
-          && (value !== initial.value || !await warning.isVisible()));
+        const selection = await readSelection();
+        return Boolean(hasCategoryLabel(selection) && (selection.value !== initial.value || !await warning.isVisible()));
       };
-      if (!retry && await isSelected()) return true;
+      if (await isSelected()) return !retry;
+      const existingPath = hasCategoryLabel(initial) ? initial.value.split(/\s+(?:>|›|\/|→)\s+/) : [];
+      const existingLeaf = normalize(existingPath[existingPath.length - 1] || '');
 
-      const chips = await page.locator(`:is(button[data-testid*="catalog-suggestion"], button[data-testid*="category-suggestion"], [data-testid*="suggestion"] button):visible`).all();
-      const chipLabels = await Promise.all(chips.map(option => option.innerText()));
-      const matchingChip = chipLabels.findIndex(label => query && normalize(label).includes(query));
-      const suggested = chips[matchingChip === -1 ? 0 : matchingChip];
-      if (suggested && await suggested.getAttribute('aria-pressed') !== 'true') {
-        await suggested.click({ timeout: 2000 }).catch(() => null);
-        if (!await menu.isVisible() && await isSelected()) return true;
+      if (!existingPath.length) {
+        const chips = await page.locator(`:is(button[data-testid*="catalog-suggestion"], button[data-testid*="category-suggestion"], [data-testid*="suggestion"] button):visible`).all();
+        const active = await Promise.all(chips.map(chip => this.isElementChecked(chip)));
+        if (!active.some(Boolean)) {
+          const labels = await Promise.all(chips.map(option => option.innerText()));
+          const match = labels.findIndex(label => query && normalize(label).includes(query));
+          const suggested = chips[match === -1 ? 0 : match];
+          if (suggested) {
+            await suggested.click({ timeout: 2000 }).catch(() => null);
+            opened = true;
+            if (!await menu.isVisible() && await isSelected()) return true;
+          }
+        }
       }
 
       if (!await menu.isVisible()) await trigger.click({ timeout: 5000 });
+      opened = true;
       await menu.waitFor({ state: 'visible', timeout: 3000 });
       const leaves = menu.locator(`:is(${CATEGORY_LEAF}):visible:not(:disabled, [aria-disabled="true"])`);
       const branches = menu.locator(`:is(div[role="button"], [role="menuitem"], button, [data-testid*="catalog"][data-testid$="--cell"]):not(:is(${CATEGORY_LEAF}), :disabled, [aria-disabled="true"], [data-testid*="chevron"]):visible`);
       const search = menu.locator('input:not([readonly], [disabled]):is([type="search"], [type="text"], [placeholder*="buscar" i], [placeholder*="search" i]):visible').first();
-      if (target && await search.isVisible()) {
+      if (!existingPath.length && target && await search.isVisible()) {
         await search.fill(target, { timeout: 2000 });
         // Vinted filters catalogs asynchronously when the search query changes.
         await page.waitForTimeout(500);
@@ -906,15 +944,23 @@ export class VintedBrowserService {
         const branchLabels = (await Promise.all(branchOptions.map(option => option.innerText()))).map(normalize);
         const leafOptions = await leaves.all();
         const leafLabels = (await Promise.all(leafOptions.map(option => option.innerText()))).map(normalize);
+        const checked = await Promise.all(leafOptions.map(option => this.isElementChecked(option)));
+        if (checked.some(Boolean) || (existingLeaf && leafLabels.includes(existingLeaf))) return !retry && await isSelected();
 
         const leafMatch = findMatch(leafLabels, query);
         let branchMatch = findMatch(branchLabels, query);
         if (branchMatch === -1 && step === 0) branchMatch = findMatch(branchLabels, category);
         const fallbackBranch = branchLabels.findIndex(label => (step === 0 ? preferredRoot : other).test(label));
         const firstBranch = branchLabels.findIndex(label => label && !/^(?:atras|volver|back)\b/.test(label));
-        const branch = branchOptions[branchMatch] || branchOptions[fallbackBranch] || branchOptions[firstBranch];
+        const currentLevel = existingPath[step];
+        const existingBranch = findMatch(branchLabels, normalize(currentLevel || ''));
+        if (existingBranch === -1 && currentLevel) {
+          const insideBranch = leafOptions.length && await menu.getByText(currentLevel, { exact: true }).first().isVisible();
+          if (!insideBranch) break;
+        }
+        const branch = branchOptions[existingBranch] || branchOptions[branchMatch] || branchOptions[fallbackBranch] || branchOptions[firstBranch];
 
-        if (leafMatch !== -1 || (branchMatch === -1 && leafOptions.length)) {
+        if (existingBranch === -1 && (leafMatch !== -1 || (branchMatch === -1 && leafOptions.length))) {
           const otherLeaf = leafLabels.findIndex(label => other.test(label));
           const index = leafMatch !== -1 ? leafMatch : Math.max(0, otherLeaf);
           await this.safeCheckOption(leafOptions[index], leafLabels[index]);
@@ -928,125 +974,9 @@ export class VintedBrowserService {
     } catch (error) {
       console.warn('[VintedPublish] Category selection failed:', error);
     } finally {
-      if (await menu.isVisible().catch(() => false)) await page.keyboard.press('Escape').catch(() => null);
+      if (opened && await menu.isVisible().catch(() => false)) await page.keyboard.press('Escape').catch(() => null);
     }
     return false;
-  }
-
-  private async selectBrand(brand?: string | null): Promise<void> {
-    if (!this.page) return;
-    try {
-      const brandBtn = await this.page.$(
-        'button[data-testid="brand-select-dropdown-input"], #brand, [data-testid="brand-select-dropdown-input"]'
-      );
-      if (brandBtn) {
-        await brandBtn.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => null);
-        await brandBtn.click();
-        await this.page.waitForTimeout(600);
-
-        let selected = false;
-        const brandQuery = (brand || '').trim();
-        const searchInput = await this.page.$(
-          '[data-radix-popper-content-wrapper] input[type="search"], [data-radix-popper-content-wrapper] input[type="text"], input[placeholder*="buscar" i]'
-        );
-
-        if (brandQuery && searchInput) {
-          await searchInput.fill(brandQuery);
-          await this.page.waitForTimeout(600);
-          const matchItem = await this.page.$(
-            `[data-radix-popper-content-wrapper] div[role="menuitem"]:has-text("${brandQuery}"), [data-radix-popper-content-wrapper] button:has-text("${brandQuery}"), [data-radix-popper-content-wrapper] div[role="radio"]:has-text("${brandQuery}")`
-          );
-          if (matchItem) {
-            await matchItem.click();
-            selected = true;
-            console.log('[VintedPublish] Brand selected: "%s"', brandQuery);
-          }
-        }
-
-        // Если бренда нет в списке или не нашли — выбираем "Publicar sin marca" / "Sin marca"
-        if (!selected) {
-          console.log('[VintedPublish] Brand "%s" not found, looking for "Publicar sin marca"...', brandQuery);
-
-          // 1. Сначала проверяем, есть ли уже кнопка/опция "Publicar sin marca" прямо на экране
-          let sinMarcaBtn = await this.page.$(
-            '[data-radix-popper-content-wrapper] button:has-text("Publicar sin marca"), ' +
-            '[data-radix-popper-content-wrapper] div[role="menuitem"]:has-text("Publicar sin marca"), ' +
-            '[data-radix-popper-content-wrapper] div[role="radio"]:has-text("Publicar sin marca"), ' +
-            '[data-radix-popper-content-wrapper] div:has-text("Publicar sin marca"), ' +
-            'button:has-text("Publicar sin marca"), ' +
-            'div[role="menuitem"]:has-text("Publicar sin marca"), ' +
-            'span:has-text("Publicar sin marca"), ' +
-            'a:has-text("Publicar sin marca")'
-          );
-
-          // 2. Если сразу нет — очищаем поиск или вводим "Sin marca"
-          if (!sinMarcaBtn && searchInput) {
-            await searchInput.fill('');
-            await searchInput.fill('Sin marca');
-            await this.page.waitForTimeout(600);
-
-            sinMarcaBtn = await this.page.$(
-              '[data-radix-popper-content-wrapper] button:has-text("Publicar sin marca"), ' +
-              '[data-radix-popper-content-wrapper] div[role="menuitem"]:has-text("Publicar sin marca"), ' +
-              '[data-radix-popper-content-wrapper] div[role="radio"]:has-text("Publicar sin marca"), ' +
-              '[data-radix-popper-content-wrapper] div:has-text("Publicar sin marca"), ' +
-              'button:has-text("Publicar sin marca"), ' +
-              'div[role="menuitem"]:has-text("Publicar sin marca"), ' +
-              'span:has-text("Publicar sin marca"), ' +
-              'a:has-text("Publicar sin marca"), ' +
-              '[data-radix-popper-content-wrapper] div[role="menuitem"]:has-text("Sin marca"), ' +
-              '[data-radix-popper-content-wrapper] button:has-text("Sin marca"), ' +
-              '[data-radix-popper-content-wrapper] div[role="radio"]:has-text("Sin marca"), ' +
-              '[data-radix-popper-content-wrapper] [role="option"]:has-text("Sin marca"), ' +
-              '[data-radix-popper-content-wrapper] span:has-text("Sin marca")'
-            );
-          }
-
-          if (sinMarcaBtn) {
-            await sinMarcaBtn.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => null);
-            await sinMarcaBtn.click();
-            selected = true;
-            console.log('[VintedPublish] Clicked "Publicar sin marca" / "Sin marca"');
-          } else {
-            // Запасные варианты на других языках
-            const fallbackOption = await this.page.$(
-              `[data-radix-popper-content-wrapper] div[role="menuitem"]:has-text("No brand"), ` +
-              `[data-radix-popper-content-wrapper] div[role="menuitem"]:has-text("Unbranded"), ` +
-              `[data-radix-popper-content-wrapper] div[role="menuitem"]:has-text("Sans marque")`
-            );
-            if (fallbackOption) {
-              await fallbackOption.click();
-              selected = true;
-              console.log('[VintedPublish] Selected fallback unbranded option');
-            } else if (searchInput) {
-              // Если ввели в поиск, проверяем первый элемент в результатах
-              const firstResult = await this.page.$(
-                '[data-radix-popper-content-wrapper] div[role="menuitem"], [data-radix-popper-content-wrapper] button, [data-radix-popper-content-wrapper] div[role="radio"]'
-              );
-              if (firstResult) {
-                const text = (await firstResult.innerText()).toLowerCase();
-                if (text.includes('marca') || text.includes('brand')) {
-                  await firstResult.click();
-                  selected = true;
-                  console.log('[VintedPublish] Selected search result for unbranded: "%s"', text.trim());
-                }
-              }
-            }
-          }
-
-          // Если так и не удалось найти "Publicar sin marca", закрываем выпадающий список (Esc), не выбирая случайный бренд
-          if (!selected) {
-            console.warn('[VintedPublish] Neither "Publicar sin marca" nor "Sin marca" found, closing brand dropdown');
-            await this.page.keyboard.press('Escape').catch(() => null);
-          }
-        }
-
-        await this.page.waitForTimeout(500);
-        await this.dismissAuthenticityModal();
-      }
-    } catch (e) {
-      console.warn('[VintedPublish] Brand selection failed:', e);
-    }
   }
 
   private async dismissAuthenticityModal(): Promise<void> {
@@ -1071,12 +1001,12 @@ export class VintedBrowserService {
         );
 
         if (confirmBtn) {
-          await confirmBtn.click().catch(() => null);
+          await confirmBtn.click({ timeout: DETAIL_TIMEOUT }).catch(() => null);
           console.log('[VintedPublish] Clicked confirmation on Authenticity modal');
         } else {
           const anyBtn = await this.page.$('div[class*="Dialog__portal"] button');
           if (anyBtn) {
-            await anyBtn.click().catch(() => null);
+            await anyBtn.click({ timeout: DETAIL_TIMEOUT }).catch(() => null);
           } else {
             await this.page.keyboard.press('Escape').catch(() => null);
           }
@@ -1088,36 +1018,145 @@ export class VintedBrowserService {
     }
   }
 
-  private async selectCondition(_wallapopCondition?: string): Promise<void> {
-    if (!this.page) return;
+  private async selectDetailOption(field: 'brand' | 'condition' | 'color' | 'material', value?: string | null): Promise<void> {
+    const page = this.page;
+    if (!page) return;
+
+    const trigger = page.locator(`:is(${DETAIL_INPUTS[field]}):not(:disabled, [aria-disabled="true"]):visible`).first();
+    if (!await trigger.isVisible()) return;
+    const requested = value?.trim();
+    const query = requested?.toLowerCase();
+    const noBrand = /^\s*(?:publicar sin marca|sin marca|no brand|unbranded|sans marque)\s*$/i;
+    let menu: Locator | undefined;
+    let opened = false;
     try {
-      // Требование: состояние всегда брать второй пункт
-      const condBtn = await this.page.$(
-        'button[data-testid="category-condition-single-list-input"], #condition'
-      );
-      if (condBtn) {
-        await condBtn.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => null);
-        await condBtn.click();
-        await this.page.waitForTimeout(600);
-
-        // В выпадающем меню состояния опции имеют div[role="radio"] внутри popover:
-        // 1-й пункт: Nuevo con etiquetas
-        // 2-й пункт: Nuevo sin etiquetas (или En muy buen estado)
-        const radioItems = await this.page.$$(
-          '[data-radix-popper-content-wrapper] div[role="radio"]'
-        );
-
-        if (radioItems.length >= 2) {
-          console.log('[VintedPublish] Selecting 2nd condition option: %s', await radioItems[1].innerText().catch(() => 'item 2'));
-          await radioItems[1].click();
-        } else if (radioItems.length === 1) {
-          await radioItems[0].click();
+      if (await trigger.evaluate(hasDropdownValue, undefined, { timeout: DETAIL_TIMEOUT })) return;
+      const control = await trigger.evaluate(element => {
+        if (element instanceof HTMLSelectElement) {
+          return {
+            options: Array.from(element.options).filter(option =>
+              option.value && !option.matches(':disabled') && !option.hidden,
+            ).map(option => ({ value: option.value, label: option.text.trim() })),
+            value: element.value,
+          };
         }
-        await this.page.waitForTimeout(500);
+        const ids = ['aria-controls', 'aria-owns'].flatMap(name =>
+          (element.getAttribute(name) || '').split(/\s+/).filter(Boolean).map(id => '#' + CSS.escape(id)),
+        );
+        const testId = element.getAttribute('data-testid');
+        if (testId?.endsWith('-input')) {
+          const prefix = CSS.escape(testId.slice(0, -6));
+          ids.push(...['-content', '-dropdown-content', '-list', '-options', '-dropdown']
+            .map(suffix => '[data-testid="' + prefix + suffix + '"]'));
+        }
+        return { selector: ids.join(', ') };
+      }, undefined, { timeout: DETAIL_TIMEOUT });
+
+      if (control.options) {
+        const match = control.options.find(option => option.label.toLowerCase() === query || option.value.toLowerCase() === query);
+        const fallback = field === 'condition' ? control.options[1] || control.options[0] : control.options[0];
+        const unbranded = control.options.find(option => noBrand.test(option.label));
+        const option = match || (field === 'brand' ? unbranded : fallback);
+        if (option && option.value !== control.value) await trigger.selectOption(option.value, { timeout: DETAIL_TIMEOUT });
+        return;
       }
-    } catch (e) {
-      console.warn('[VintedPublish] Condition selection failed:', e);
+
+      const cells = `:is([data-testid*="${field}"][data-testid$="--cell"], [class*="Cell__cell"][role="button"]):not(:has(:is(${DETAIL_OPTION})))`;
+      const brandOptions = field === 'brand' ? ', button:not(:has(:is(' + DETAIL_OPTION + ')))' : '';
+      const enabled = ':not(:disabled, [aria-disabled="true"], [aria-disabled="true"] *, [aria-hidden="true"], [aria-hidden="true"] *):visible';
+      const optionSelector = `:is(${DETAIL_OPTION}, ${cells}${brandOptions}):not(:is(${DETAIL_ROLE}) :is(${DETAIL_OPTION}), :is(${DETAIL_INPUTS[field]}), [role="menuitem"][aria-haspopup])${enabled}`;
+      const searchSelector = `input:is([type="search"], [type="text"], :not([type])):not(:read-only)${enabled}`;
+      const offering = page.locator(optionSelector);
+      const content = field === 'brand' ? offering.or(page.locator(searchSelector)).or(page.getByText(noBrand)) : offering;
+      const associated = control.selector ? page.locator(`:is(${control.selector}):visible`).filter({ has: content }).first() : undefined;
+      const nearby = trigger.locator('xpath=ancestor::li[1]').filter({ has: content });
+      const portals = page.locator(`:is(${DROPDOWN_CONTENT}, [role="dialog"], [class*="Dialog__modal"], [class*="dropdown__list"], [class*="dropdown__options"], [data-testid$="-dropdown-content"]):not([data-state="closed"], [aria-hidden="true"]):visible`)
+        .filter({ has: content, hasNot: page.locator(DETAIL_INPUTS[field]) });
+      const fallback = nearby.or(portals).first();
+      if (associated && await associated.isVisible()) {
+        menu = associated;
+      } else {
+        await trigger.click({ timeout: DETAIL_TIMEOUT });
+        opened = true;
+        await (associated ? associated.or(fallback).first() : fallback).waitFor({ state: 'visible', timeout: DETAIL_TIMEOUT });
+        menu = associated && await associated.isVisible() ? associated : fallback;
+      }
+
+      const choices = menu.locator(optionSelector);
+      if (field !== 'brand') await choices.first().waitFor({ state: 'visible', timeout: DETAIL_TIMEOUT });
+      if (await this.hasCheckedChoice(menu)) return;
+      if (field === 'brand') {
+        const search = menu.locator(searchSelector).first();
+        const waitFor = (locator: Locator) => locator.waitFor({ state: 'visible', timeout: DETAIL_TIMEOUT })
+          .then(() => true, () => false);
+        if (requested) {
+          if (await waitFor(search)) {
+            if (await this.hasCheckedChoice(menu)) return;
+            await search.fill(requested, { timeout: DETAIL_TIMEOUT });
+          }
+          const escaped = requested.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const label = new RegExp(`^\\s*${escaped}\\s*$`, 'i');
+          const match = choices.filter({ hasText: label }).or(choices.filter({ has: page.getByText(label) })).first();
+          if (await waitFor(match)) {
+            if (!await trigger.evaluate(hasDropdownValue, undefined, { timeout: DETAIL_TIMEOUT })) {
+              await match.click({ timeout: DETAIL_TIMEOUT });
+            }
+            return;
+          }
+        }
+        const withoutBrand = menu.getByText(noBrand).or(page.getByText('Publicar sin marca', { exact: true }))
+          .and(page.locator(enabled)).first();
+        if (!await withoutBrand.isVisible() && await waitFor(search)) {
+          if (await trigger.evaluate(hasDropdownValue, undefined, { timeout: DETAIL_TIMEOUT })) return;
+          await search.fill('Sin marca', { timeout: DETAIL_TIMEOUT });
+        }
+        await withoutBrand.waitFor({ state: 'visible', timeout: DETAIL_TIMEOUT });
+        if (!await trigger.evaluate(hasDropdownValue, undefined, { timeout: DETAIL_TIMEOUT })) {
+          await withoutBrand.click({ timeout: DETAIL_TIMEOUT });
+        }
+        return;
+      }
+
+      if (field === 'condition') {
+        // Default to the second condition when Vinted has left the field empty.
+        await this.safeCheckOption(choices.nth(await choices.count() > 1 ? 1 : 0), 'condition', DETAIL_TIMEOUT);
+        return;
+      }
+
+      const options = await choices.all();
+      const labels = query ? await Promise.all(options.map(async option =>
+        (await option.getAttribute('aria-label', { timeout: DETAIL_TIMEOUT })
+          || await option.innerText({ timeout: DETAIL_TIMEOUT })).trim().toLowerCase(),
+      )) : [];
+      const exact = labels.indexOf(query || '');
+      const match = exact === -1 && query ? labels.findIndex(label => label.includes(query)) : exact;
+      if (match !== -1) {
+        await this.safeCheckOption(options[match], field, DETAIL_TIMEOUT);
+        return;
+      }
+      await this.safeCheckOption(choices.first(), field, DETAIL_TIMEOUT);
+    } catch (error) {
+      console.warn('[VintedPublish] Could not select %s:', field, error);
+    } finally {
+      if (menu ? await menu.isVisible().catch(() => false) : opened) {
+        await page.keyboard.press('Escape').catch(() => null);
+        await menu?.waitFor({ state: 'hidden', timeout: 500 }).catch(() => null);
+        if (menu && await menu.isVisible().catch(() => false)) {
+          const close = menu.locator('button[aria-label="Cerrar" i]:visible, button[aria-label="Close" i]:visible, [data-testid="modal-close"]:visible').first();
+          if (await close.isVisible().catch(() => false)) {
+            await close.click({ timeout: 1000 }).catch(() => null);
+          } else {
+            await trigger.click({ timeout: 1000 }).catch(() => null);
+          }
+        }
+      }
     }
+  }
+
+  private async hasCheckedChoice(menu: Locator): Promise<boolean> {
+    if (await menu.locator(`:is(${CHECKED_CHOICE}):visible, ${CHECKED_INPUT}`).count()) return true;
+    const options = await menu.locator(`:is(${DETAIL_OPTION}):visible`).all();
+    return (await Promise.all(options.map(option => this.isElementChecked(option)))).some(Boolean);
   }
 
   private async isElementChecked(el: any): Promise<boolean> {
@@ -1130,12 +1169,11 @@ export class VintedBrowserService {
           return node.checked;
         }
         // 2. Атрибут aria-checked="true"
-        if (node.getAttribute('aria-checked') === 'true') {
+        if (node.matches('[aria-checked="true"], [aria-selected="true"], [aria-pressed="true"], [data-state="checked"], [data-state="selected"], [data-selected="true"]')) {
           return true;
         }
         // 3. Дочерний input checkbox / radio с флагом checked
-        const childInput = node.querySelector ? node.querySelector('input[type="checkbox"], input[type="radio"]') : null;
-        if (childInput && (childInput as HTMLInputElement).checked) {
+        if (node.querySelector('input[type="checkbox"]:checked, input[type="radio"]:checked')) {
           return true;
         }
         // 4. Наличие атрибута checked
@@ -1143,21 +1181,19 @@ export class VintedBrowserService {
           return true;
         }
         // 5. CSS классы активного/выбранного чекбокса
-        const className = (node.className || '').toString();
-        if (/(?:^|\s|-|_)(checked|selected|active)(?:$|\s|-|_)/i.test(className) && !className.includes('not-checked')) {
-          const role = node.getAttribute('role');
-          if (role === 'checkbox' || role === 'radio' || role === 'menuitemcheckbox') {
-            return true;
-          }
-        }
-        return false;
+        if (node.matches('[aria-checked="false"], [aria-selected="false"], [data-state="unchecked"], [data-selected="false"]')) return false;
+        const classNames = Array.from(node.classList as DOMTokenList);
+        return classNames.some(name => /(?:^|[-_])(?:checked|selected)(?:$|[-_])/i.test(name)
+          && !/(?:^|[-_])(?:not|un)[-_]?(?:checked|selected)(?:$|[-_])/i.test(name))
+          || (node.matches('[role="radio"], [role="checkbox"], [role="menuitemcheckbox"], [role="menuitemradio"]')
+            && classNames.some(name => /(?:^|[-_])active(?:$|[-_])/i.test(name)));
       });
     } catch {
       return false;
     }
   }
 
-  private async safeCheckOption(el: any, description: string = 'option'): Promise<boolean> {
+  private async safeCheckOption(el: any, description: string = 'option', timeout = 5000): Promise<boolean> {
     if (!el) return false;
     try {
       const alreadyChecked = await this.isElementChecked(el);
@@ -1165,8 +1201,7 @@ export class VintedBrowserService {
         console.log(`[VintedPublish] Option "${description}" is ALREADY checked. Keeping it (no click).`);
         return true;
       }
-      await el.evaluate((node: any) => node.scrollIntoView({ block: 'center' })).catch(() => null);
-      await el.click({ timeout: 5000 });
+      await el.click({ timeout });
       console.log(`[VintedPublish] Clicked to check option "${description}".`);
       return true;
     } catch (e) {
@@ -1177,22 +1212,15 @@ export class VintedBrowserService {
 
   private async selectSize(size?: string | null): Promise<void> {
     if (!this.page) return;
+    let opened = false;
     try {
-      const sizeBtn = await this.page.$(
-        'button[data-testid="category-size-single-grid-input"], ' +
-        'button[data-testid="category-size-single-list-input"], ' +
-        'button[data-testid*="size-single"], ' +
-        'button[data-testid*="category-size"], ' +
-        '#size, ' +
-        '[data-testid="category-size-single-grid-input"], ' +
-        '[data-testid="category-size-single-list-input"], ' +
-        'button:has-text("Talla"), ' +
-        'button:has-text("Elige la talla"), ' +
-        'button:has-text("Medidas")'
-      );
-      if (sizeBtn) {
-        await sizeBtn.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => null);
-        await sizeBtn.click();
+      const sizeBtn = this.page.locator(':is(' + DETAIL_INPUTS.size + '):visible').first();
+      const sizeByName = this.page.getByRole('button', { name: /^(?:talla|elige la talla|medidas)$/i }).first();
+      const trigger = await sizeBtn.isVisible() ? sizeBtn : sizeByName;
+      if (await trigger.isVisible()) {
+        if (await trigger.evaluate(hasDropdownValue, undefined, { timeout: DETAIL_TIMEOUT })) return;
+        await trigger.click({ timeout: DETAIL_TIMEOUT });
+        opened = true;
         await this.page.waitForTimeout(600);
 
         // Если вылезла отдельная информационная подсказка / модалка о таблице размеров с кнопкой закрытия/подтверждения
@@ -1203,7 +1231,7 @@ export class VintedBrowserService {
           'div[class*="Dialog__modal"]:has-text("Tabla de tallas") [data-testid="modal-close"]'
         );
         if (infoModalClose) {
-          await infoModalClose.click().catch(() => null);
+          await infoModalClose.click({ timeout: DETAIL_TIMEOUT }).catch(() => null);
           await this.page.waitForTimeout(400);
         }
 
@@ -1216,27 +1244,14 @@ export class VintedBrowserService {
           'div[class*="flat"]'
         ];
 
+        const nearby = trigger.locator('xpath=ancestor::li[1]');
+        const menus = this.page.locator(`:is(${containerSelectors.join(', ')}, ${DROPDOWN_CONTENT}):not([data-state="closed"], [aria-hidden="true"]):visible`)
+          .filter({ hasNot: this.page.locator(DETAIL_INPUTS.size) }).or(nearby);
+        for (const menu of await menus.all()) {
+          if (await this.hasCheckedChoice(menu)) return;
+        }
         let selected = false;
         const sizeQuery = (size || '').trim().toLowerCase();
-
-        // 0. Проверяем: если на сайте УЖЕ проставлен нужный чекбокс и у пользователя нет особого требования к размеру — не трогаем!
-        if (!sizeQuery) {
-          const alreadyCheckedSize = await this.page.$(
-            'div[class*="dropdown__content"] [role="checkbox"][aria-checked="true"], ' +
-            'div[class*="dropdown__content"] [role="radio"][aria-checked="true"], ' +
-            '[data-radix-popper-content-wrapper] [role="checkbox"][aria-checked="true"], ' +
-            '[data-radix-popper-content-wrapper] [role="radio"][aria-checked="true"], ' +
-            'div[role="checkbox"][aria-checked="true"]'
-          );
-          if (alreadyCheckedSize) {
-            const checkedText = (
-              (await alreadyCheckedSize.getAttribute('aria-label').catch(() => '')) ||
-              (await alreadyCheckedSize.innerText().catch(() => ''))
-            ).trim();
-            console.log('[VintedPublish] Size is ALREADY checked on page ("%s"). Preserving it (not unchecking).', checkedText);
-            selected = true;
-          }
-        }
 
         // 1. Если указан конкретный размер, ищем совпадение по aria-label или тексту
         if (sizeQuery && !selected) {
@@ -1248,9 +1263,7 @@ export class VintedBrowserService {
             `[data-radix-popper-content-wrapper] :has-text("${sizeQuery}")`
           );
           if (directMatch) {
-            await this.safeCheckOption(directMatch, `size ${sizeQuery}`);
-            selected = true;
-            console.log('[VintedPublish] Size selected via direct match: "%s"', sizeQuery);
+            selected = await this.safeCheckOption(directMatch, `size ${sizeQuery}`, DETAIL_TIMEOUT);
           }
         }
 
@@ -1268,9 +1281,7 @@ export class VintedBrowserService {
           );
 
           if (otraDirect) {
-            await this.safeCheckOption(otraDirect, 'Otra / Otro');
-            selected = true;
-            console.log('[VintedPublish] Selected "Otra" / "Otro" via direct aria-label');
+            selected = await this.safeCheckOption(otraDirect, 'Otra / Otro', DETAIL_TIMEOUT);
           }
         }
 
@@ -1292,9 +1303,7 @@ export class VintedBrowserService {
               ).toLowerCase().trim();
 
               if (/\botra(s)?\b/i.test(text) || /\botro(s)?\b/i.test(text)) {
-                await this.safeCheckOption(opt, text);
-                selected = true;
-                console.log('[VintedPublish] Selected size option from container: "%s"', text);
+                selected = await this.safeCheckOption(opt, text, DETAIL_TIMEOUT);
                 break;
               }
             }
@@ -1308,9 +1317,7 @@ export class VintedBrowserService {
               ).toLowerCase().trim();
 
               if (text.includes('única') || text.includes('unica') || text.includes('sin talla') || text.includes('universal')) {
-                await this.safeCheckOption(opt, text);
-                selected = true;
-                console.log('[VintedPublish] Selected size fallback option: "%s"', text);
+                selected = await this.safeCheckOption(opt, text, DETAIL_TIMEOUT);
                 break;
               }
             }
@@ -1335,9 +1342,7 @@ export class VintedBrowserService {
               ) {
                 continue;
               }
-              await this.safeCheckOption(opt, text);
-              selected = true;
-              console.log('[VintedPublish] Selected first available size option: "%s"', text);
+              selected = await this.safeCheckOption(opt, text, DETAIL_TIMEOUT);
               break;
             }
             if (selected) break;
@@ -1353,125 +1358,15 @@ export class VintedBrowserService {
           'div[role="dialog"] button:has-text("Guardar")'
         );
         if (confirmBtn) {
-          await confirmBtn.click().catch(() => null);
+          await confirmBtn.click({ timeout: DETAIL_TIMEOUT }).catch(() => null);
         }
 
         await this.page.waitForTimeout(500);
-        await this.page.keyboard.press('Escape').catch(() => null);
       }
     } catch (e) {
       console.warn('[VintedPublish] Size selection failed:', e);
-    }
-  }
-
-  private async selectColor(color?: string | null): Promise<void> {
-    if (!this.page) return;
-    try {
-      const colorBtn = await this.page.$(
-        'button[data-testid="color-select-dropdown-input"], #color, [data-testid="color-select-dropdown-input"]'
-      );
-      if (colorBtn) {
-        await colorBtn.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => null);
-        await colorBtn.click();
-        await this.page.waitForTimeout(600);
-
-        let selected = false;
-        const colorQuery = (color || '').trim().toLowerCase();
-
-        // 0. Проверяем: если Vinted уже сам выбрал цвет (чекбокс стоит)
-        const alreadyCheckedColor = await this.page.$(
-          '[data-radix-popper-content-wrapper] [role="checkbox"][aria-checked="true"], ' +
-          '[data-radix-popper-content-wrapper] input[type="checkbox"]:checked, ' +
-          '[data-radix-popper-content-wrapper] [aria-checked="true"]'
-        );
-
-        if (alreadyCheckedColor && !colorQuery) {
-          const checkedText = (
-            (await alreadyCheckedColor.getAttribute('aria-label').catch(() => '')) ||
-            (await alreadyCheckedColor.innerText().catch(() => ''))
-          ).trim();
-          console.log('[VintedPublish] Color is ALREADY checked by Vinted ("%s"). Preserving it (not unchecking).', checkedText);
-          selected = true;
-        }
-
-        if (colorQuery && !selected) {
-          const colorOption = await this.page.$(
-            `[data-radix-popper-content-wrapper] [role="checkbox"]:has-text("${colorQuery}"), [data-radix-popper-content-wrapper] button:has-text("${colorQuery}")`
-          );
-          if (colorOption) {
-            await this.safeCheckOption(colorOption, colorQuery);
-            selected = true;
-          }
-        }
-
-        // Если цвет не задан и никакой цвет еще не выбран — берем первый
-        if (!selected && !alreadyCheckedColor) {
-          const firstOption = await this.page.$(
-            '[data-radix-popper-content-wrapper] [role="checkbox"], [data-radix-popper-content-wrapper] div[role="radio"], [data-radix-popper-content-wrapper] button'
-          );
-          if (firstOption) {
-            await this.safeCheckOption(firstOption, 'first color');
-          }
-        }
-        await this.page.waitForTimeout(500);
-        await this.page.keyboard.press('Escape').catch(() => null);
-      }
-    } catch (e) {
-      console.warn('[VintedPublish] Color selection failed:', e);
-    }
-  }
-
-  private async selectMaterial(material?: string | null): Promise<void> {
-    if (!this.page) return;
-    try {
-      const matBtn = await this.page.$(
-        'button[data-testid="category-material-multi-list-input"], #material, [data-testid="category-material-multi-list-input"]'
-      );
-      if (matBtn) {
-        await matBtn.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => null);
-        await matBtn.click();
-        await this.page.waitForTimeout(600);
-
-        let selected = false;
-        const matQuery = (material || '').trim().toLowerCase();
-
-        // 0. Проверяем: если материал уже выбран на сайте (чекбокс стоит)
-        const alreadyCheckedMat = await this.page.$(
-          '[data-radix-popper-content-wrapper] [role="checkbox"][aria-checked="true"], ' +
-          '[data-radix-popper-content-wrapper] input[type="checkbox"]:checked, ' +
-          '[data-radix-popper-content-wrapper] [aria-checked="true"]'
-        );
-
-        if (alreadyCheckedMat && !matQuery) {
-          const checkedText = (
-            (await alreadyCheckedMat.getAttribute('aria-label').catch(() => '')) ||
-            (await alreadyCheckedMat.innerText().catch(() => ''))
-          ).trim();
-          console.log('[VintedPublish] Material is ALREADY checked by Vinted ("%s"). Preserving it (not unchecking).', checkedText);
-          selected = true;
-        }
-
-        if (matQuery && !selected) {
-          const matOption = await this.page.$(`[data-radix-popper-content-wrapper] :has-text("${matQuery}")`);
-          if (matOption) {
-            await this.safeCheckOption(matOption, matQuery);
-            selected = true;
-          }
-        }
-
-        if (!selected && !alreadyCheckedMat) {
-          const firstOption = await this.page.$(
-            '[data-radix-popper-content-wrapper] [role="checkbox"], [data-radix-popper-content-wrapper] div[role="menuitem"], [data-radix-popper-content-wrapper] button'
-          );
-          if (firstOption) {
-            await this.safeCheckOption(firstOption, 'first material');
-          }
-        }
-        await this.page.waitForTimeout(500);
-        await this.page.keyboard.press('Escape').catch(() => null);
-      }
-    } catch (e) {
-      console.warn('[VintedPublish] Material selection failed:', e);
+    } finally {
+      if (opened) await this.page.keyboard.press('Escape').catch(() => null);
     }
   }
 
@@ -1479,13 +1374,14 @@ export class VintedBrowserService {
     const page = this.page;
     if (!page) return false;
     const menu = page.locator(`:is(${DROPDOWN_CONTENT}):visible`).first();
+    let opened = false;
 
     try {
+      if (await trigger.evaluate(hasDropdownValue)) return false;
       await trigger.click({ timeout: 3000 });
+      opened = true;
       await menu.waitFor({ state: 'visible', timeout: 2000 });
-      if (await menu.locator('[aria-checked="true"]:visible, [aria-selected="true"]:visible, input:checked').count()) {
-        return false;
-      }
+      if (await this.hasCheckedChoice(menu)) return false;
 
       const option = menu.locator(`:is(${DROPDOWN_OPTION}):not(:disabled, [aria-disabled="true"]):visible`).first();
       if (await option.isVisible()) return await this.safeCheckOption(option, 'dynamic field option');
@@ -1497,13 +1393,14 @@ export class VintedBrowserService {
       console.warn('[VintedPublish] Dynamic field selection failed:', error);
       return false;
     } finally {
-      if (await menu.isVisible().catch(() => false)) await page.keyboard.press('Escape').catch(() => null);
+      if (opened && await menu.isVisible().catch(() => false)) await page.keyboard.press('Escape').catch(() => null);
     }
   }
 
   private async fillRemainingDynamicFields(): Promise<void> {
     if (!this.page) return;
-    const unselectedButtons = this.page.locator(`.select-wrapper button[aria-haspopup="menu"][data-placeholder=""]:not(:is(${CATEGORY_INPUT})):visible`);
+    const known = [CATEGORY_INPUT, ...Object.values(DETAIL_INPUTS)].join(', ');
+    const unselectedButtons = this.page.locator(`.select-wrapper button[aria-haspopup="menu"][data-placeholder=""]:not(:is(${known})):visible`);
     for (const button of await unselectedButtons.elementHandles()) {
       await this.fillDropdown(button);
     }
@@ -1512,7 +1409,12 @@ export class VintedBrowserService {
   private async handlePackageSize(): Promise<boolean> {
     if (!this.page) return false;
     try {
-      // Требование: всегда выбирать рекомендованный / маленький размер (Pequeño / Recomendado)
+      const packageRadio = 'input[type="radio"]:is([name*="package_type_selector"], [name*="package_size"], [id^="package_type_selector"])';
+      if (await this.page.locator(packageRadio + ':checked').count()) return false;
+      const packageCells = this.page.locator(':is([data-testid$="package-size--cell"], [id^="package-size-"]):visible');
+      if ((await Promise.all((await packageCells.all()).map(cell => this.isElementChecked(cell)))).some(Boolean)) return false;
+
+      // Prefer the recommended or small option when no package size has been selected.
       // 1. Проверяем вариант с бейджем Recomendado
       const recommendedCell = await this.page.$(
         'div:has(span:has-text("Recomendado")) input[type="radio"], ' +
@@ -1545,7 +1447,7 @@ export class VintedBrowserService {
       }
 
       // 3. Если нет, берем первый радиобаттон размера (наименьший)
-      const firstRadio = await this.page.$('input[name*="package_type_selector"], input[name*="package_size"]');
+      const firstRadio = await this.page.$(packageRadio);
       if (firstRadio) {
         await firstRadio.click();
         console.log('[VintedPublish] Selected first available package size');
