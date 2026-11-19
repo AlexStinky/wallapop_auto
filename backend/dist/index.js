@@ -45,6 +45,7 @@ const prisma_1 = __importDefault(require("./db/prisma"));
 const products_1 = __importStar(require("./routes/products"));
 const queue_1 = __importDefault(require("./routes/queue"));
 const vinted_queue_service_1 = require("./services/vinted-queue.service");
+const publication_state_1 = require("./services/publication-state");
 const settings_1 = __importDefault(require("./routes/settings"));
 const error_1 = require("./middleware/error");
 const app = (0, express_1.default)();
@@ -131,6 +132,7 @@ async function initDb() {
 // ─── Start ────────────────────────────────────────────────────────────────────
 async function start() {
     await initDb();
+    await (0, publication_state_1.restorePublishedProducts)();
     await vinted_queue_service_1.vintedQueueService.loadPendingFromDb();
     const host = process.env.HOST || '0.0.0.0';
     app.listen(PORT, host, () => {

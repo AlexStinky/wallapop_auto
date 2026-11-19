@@ -7,6 +7,7 @@ import prisma from './db/prisma';
 import productsRouter, { uploadMiddleware, handleUpload } from './routes/products';
 import queueRouter from './routes/queue';
 import { vintedQueueService } from './services/vinted-queue.service';
+import { restorePublishedProducts } from './services/publication-state';
 import settingsRouter from './routes/settings';
 import { createError, errorHandler, notFound } from './middleware/error';
 
@@ -113,6 +114,7 @@ async function initDb(): Promise<void> {
 
 async function start(): Promise<void> {
   await initDb();
+  await restorePublishedProducts();
   await vintedQueueService.loadPendingFromDb();
 
   const host = process.env.HOST || '0.0.0.0';

@@ -61,19 +61,45 @@ export default function ProductDetailPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     const fetch = async () => {
       try {
         const data = await getProduct(id);
-        setProduct(data);
+        if (!cancelled) setProduct(data);
       } catch {
-        toast.error('Товар не знайдено');
-        router.back();
+        if (!cancelled) {
+          toast.error('Товар не знайдено');
+          router.back();
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
-    fetch();
+    void fetch();
+    return () => { cancelled = true; };
   }, [id, router]);
+
+  useEffect(() => {
+    if (loading || publishing) return;
+
+    let cancelled = false;
+    let timer = setTimeout(refresh, 3000);
+    async function refresh() {
+      try {
+        const data = await getProduct(id);
+        if (!cancelled) setProduct(data);
+      } catch {
+        // Keep the last status visible until the API responds again.
+      } finally {
+        if (!cancelled) timer = setTimeout(refresh, 3000);
+      }
+    }
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [id, loading, publishing]);
 
   const handleAddToQueue = async () => {
     if (!product) return;

@@ -4,6 +4,32 @@ import { ProductStatus } from '../types';
 
 type Platform = 'wallapop' | 'vinted';
 
+export async function restorePublishedProducts(): Promise<void> {
+  await prisma.product.updateMany({
+    where: {
+      status: 'pending',
+      AND: [
+        {
+          OR: [
+            { wallapopStatus: 'published' },
+            { vintedStatus: 'published' },
+            { wallapopId: { isSet: true, not: null, notIn: [''] } },
+            { vintedId: { isSet: true, not: null, notIn: [''] } },
+          ],
+        },
+        ...(['wallapopStatus', 'vintedStatus'] as const).map(field => ({
+          OR: [
+            { [field]: { in: ['pending', 'published'] } },
+            { [field]: null },
+            { [field]: { isSet: false } },
+          ],
+        })),
+      ],
+    },
+    data: { status: 'published' },
+  });
+}
+
 // Commit the platform result and the overall status together. The other worker
 // may finish the same product at the same time.
 export async function setPublicationState(
@@ -23,8 +49,8 @@ export async function setPublicationState(
       const priorListing = other === 'wallapop' ? product.wallapopId : product.vintedId;
       states.push(priorListing && (!sibling || sibling === 'pending') ? 'published' : sibling ?? 'pending');
     }
-    const status = (['publishing', 'in_queue', 'error'] as const).find(s => states.includes(s))
-      ?? (states.every(s => s === 'published') ? 'published' : 'pending');
+    const status = (['publishing', 'in_queue', 'error', 'published'] as const).find(s => states.includes(s))
+      ?? 'pending';
 
     // Match the sibling state as well as the timestamp: two writes can share a
     // millisecond. MongoDB records created before the status field have it unset.

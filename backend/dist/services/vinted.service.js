@@ -66,6 +66,9 @@ const DETAIL_INPUTS = {
     color: '#color, [data-testid="color-select-dropdown-input"], [data-testid*="category-color"][data-testid$="-input"]',
     material: '#material, [data-testid*="category-material"][data-testid$="-input"]',
 };
+function vintedFormTitle(product) {
+    return (product.vintedTitle || product.title || '').trim().replace(/(\p{Lu}{2})(\p{Lu}+)/gu, (_, firstTwo, rest) => firstTwo + rest.toLowerCase());
+}
 function hasDropdownValue(element) {
     if (!(element instanceof HTMLElement))
         return false;
@@ -542,12 +545,11 @@ class VintedBrowserService {
                     }
                 }
             }
-            // 2. Title: Use specific vintedTitle if provided, else fallback to standard title
-            const titleToUse = (product.vintedTitle || product.title).trim();
+            // 2. Title
             const titleInput = await this.page.waitForSelector(TITLE_INPUT, { timeout: 10000 });
             if (titleInput) {
                 await titleInput.click();
-                await titleInput.fill(titleToUse);
+                await titleInput.fill(vintedFormTitle(product));
                 await this.randomDelay(300, 600);
             }
             // 3. Description: Use specific vintedDescription if provided, else fallback
@@ -694,7 +696,7 @@ class VintedBrowserService {
         };
         let repaired = messages.some(message => CATEGORY_WARNING.test(message)) && await repairCategory();
         const valueFields = {
-            title: { selector: TITLE_INPUT, value: product.vintedTitle || product.title },
+            title: { selector: TITLE_INPUT, value: vintedFormTitle(product) },
             description: { selector: DESCRIPTION_INPUT, value: product.vintedDescription || product.description },
             price: { selector: PRICE_INPUT, value: String(product.vintedPrice ?? product.price).replace('.', ',') },
             model: { selector: '#model, input[name="model"]', value: product.model },

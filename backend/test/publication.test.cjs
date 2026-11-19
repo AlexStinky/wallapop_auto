@@ -26,7 +26,7 @@ test('product API, publication queues and uploads', { timeout: 30000 }, async t 
   const { browserService } = require('../dist/services/browser.service');
   const { vintedBrowserService } = require('../dist/services/vinted.service');
   const { queueService, queueEvents } = require('../dist/services/queue.service');
-  const { setPublicationState } = require('../dist/services/publication-state');
+  const { restorePublishedProducts, setPublicationState } = require('../dist/services/publication-state');
   const { resolveUploadedPhoto } = require('../dist/uploads');
   const app = express().use(express.json()).use('/products', products).use(errorHandler);
   const server = app.listen(0, '127.0.0.1');
@@ -116,6 +116,39 @@ test('product API, publication queues and uploads', { timeout: 30000 }, async t 
     await Promise.all(['vinted', 'wallapop'].map(platform => setPublicationState(item.id, platform, 'published')));
     assert.equal((await db.product.findUniqueOrThrow({ where: { id: item.id } })).status, 'published');
   });
+
+  await t.test('reports a successful single-platform publication when the other platform is idle', async () => {
+    for (const [platform, other] of [['wallapop', 'vinted'], ['vinted', 'wallapop']]) {
+      const item = await draft(platform);
+      await setPublicationState(item.id, platform, 'in_queue');
+      await setPublicationState(item.id, platform, 'publishing');
+      await setPublicationState(item.id, platform, 'published');
+
+      const result = await fetch(base + '/' + item.id).then(response => response.json());
+      assert.equal(result.status, 'published');
+      assert.equal(result[platform + 'Status'], 'published');
+      assert.equal(result[other + 'Status'], 'pending');
+    }
+  });
+
+  await t.test('restores the status of existing publications', async () => {
+    const published = await draft('published with no listing ID');
+    const legacy = await draft('legacy publication');
+    const queued = await draft('waiting for the other platform');
+    const pending = await draft('unpublished');
+    await db.product.update({ where: { id: published.id }, data: { vintedStatus: 'published' } });
+    await db.product.update({ where: { id: legacy.id }, data: { wallapopId: 'legacy-id', wallapopStatus: { unset: true } } });
+    await db.product.update({ where: { id: queued.id }, data: { wallapopStatus: 'published', vintedStatus: 'in_queue' } });
+    await db.product.update({ where: { id: pending.id }, data: { wallapopId: '', vintedId: null } });
+
+    await restorePublishedProducts();
+
+    const list = await fetch(base + '?status=published').then(response => response.json());
+    assert.ok(list.some(item => item.id === published.id));
+    assert.ok(list.some(item => item.id === legacy.id));
+    assert.ok(!list.some(item => item.id === queued.id));
+    assert.ok(!list.some(item => item.id === pending.id));
+  });
 });
 
 async function launchVintedBrowser(t) {
@@ -137,7 +170,7 @@ test('Vinted repairs skipped fields after form validation', { timeout: 30000 }, 
   const browser = await launchVintedBrowser(t);
   if (!browser) return;
 
-  async function publish(canSelectCategory, brandAvailable = true) {
+  async function publish(canSelectCategory, brandAvailable = true, vintedTitle) {
     const page = await browser.newPage();
     const service = new VintedBrowserService();
     service.page = page;
@@ -150,7 +183,7 @@ test('Vinted repairs skipped fields after form validation', { timeout: 30000 }, 
       body: new URL(route.request().url()).pathname === '/items/new' ? `
         <form>
           <input id="site-search" placeholder="Buscar artículos">
-          <input id="title">
+          <div><input id="title"><div id="title-note"></div></div>
           <textarea id="description"></textarea>
           <div>
             <button type="button" data-testid="catalog-suggestion" aria-pressed="true">Ropa</button>
@@ -188,6 +221,7 @@ test('Vinted repairs skipped fields after form validation', { timeout: 30000 }, 
         </div>
         <script>
           const byId = id => document.getElementById(id);
+          const title = byId('title');
           const category = byId('category');
           const format = byId('format');
           const price = byId('price');
@@ -197,6 +231,7 @@ test('Vinted repairs skipped fields after form validation', { timeout: 30000 }, 
           const brandSearch = byId('brand-search');
           const brandSearches = [];
           let submissions = 0;
+          let firstTitle;
           const warning = (id, message) => {
             byId(id).innerHTML = message
               ? '<div class="web_ui__Validation__validation web_ui__Validation__warning" role="alert">' + message + '</div>'
@@ -264,21 +299,25 @@ test('Vinted repairs skipped fields after form validation', { timeout: 30000 }, 
           });
           document.querySelector('[data-testid="upload-form-save-button"]').onclick = () => {
             submissions++;
+            if (submissions === 1) firstTitle = title.value;
             if (!category.value) {
               warning('category-note', 'Elige una subcategoría');
             } else if (!format.value || !brand.value) {
+              title.value = '';
               price.value = '';
               byId('brand-field').hidden = false;
               warning('brand-note', 'Selecciona una marca');
               warning('format-note', 'Selecciona un formato');
+              warning('title-note', 'Introduce un título');
               warning('price-note', 'Introduce un precio');
             }
             sessionStorage.setItem('form', JSON.stringify({
               submissions, category: category.value, format: format.value,
               price: price.value, untouched: byId('untouched').value,
               brand: brand.value, brandSearches, siteSearch: byId('site-search').value,
+              firstTitle, title: title.value,
             }));
-            if (category.value && format.value && price.value && brand.value) location.assign('/items/12345-marco');
+            if (category.value && format.value && title.value && price.value && brand.value) location.assign('/items/12345-marco');
           };
         </script>
       ` : '<p>Published</p>',
@@ -286,7 +325,8 @@ test('Vinted repairs skipped fields after form validation', { timeout: 30000 }, 
 
     const result = await service.publishProduct({
       id: 'validation-test',
-      title: 'Marco',
+      title: '  MARCO de pared XL para ÁLBUM  ',
+      vintedTitle,
       description: 'Marco de madera',
       price: 15.5,
       category: 'Hogar',
@@ -307,13 +347,16 @@ test('Vinted repairs skipped fields after form validation', { timeout: 30000 }, 
   assert.deepEqual(recovered.form, {
     submissions: 3, category: 'Decoración', format: 'Mediano', price: '15,5', untouched: 'Original',
     brand: 'Winfaith', brandSearches: ['Winfaith'], siteSearch: '',
+    firstTitle: 'MArco de pared XL para ÁLbum', title: 'MArco de pared XL para ÁLbum',
   });
 
-  const unbranded = await publish(true, false);
+  const unbranded = await publish(true, false, '  Marco LIJADO  ');
   assert.equal(unbranded.result.success, true);
   assert.equal(unbranded.form.brand, 'Sin marca');
   assert.deepEqual(unbranded.form.brandSearches, ['Winfaith', 'Sin marca']);
   assert.equal(unbranded.form.siteSearch, '');
+  assert.equal(unbranded.form.firstTitle, 'Marco LIjado');
+  assert.equal(unbranded.form.title, 'Marco LIjado');
 
   const blocked = await publish(false);
   assert.equal(blocked.result.success, false);
